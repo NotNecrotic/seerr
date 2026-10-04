@@ -6,9 +6,11 @@ import type {
   MbArtistDetails,
   MbArtistSearchResult,
   MbReleaseDetails,
+  MbReleaseMedia,
   MbReleaseSearchResult,
   MbSearchResponse,
 } from './interfaces';
+import { mbResults } from './interfaces';
 
 /**
  * Cover Art Archive, which serves album and artist art for MusicBrainz.
@@ -148,7 +150,7 @@ class MusicBrainzAPI extends ExternalAPI {
     }
 
     const response = await this.getRolling<
-      MbSearchResponse<MbReleaseSearchResult>
+      MbSearchResponse<'releases', MbReleaseSearchResult>
     >(
       '/release',
       {
@@ -162,7 +164,7 @@ class MusicBrainzAPI extends ExternalAPI {
       3600
     );
 
-    return response.results.map((result) =>
+    return mbResults(response, 'releases').map((result) =>
       this.mapReleaseSearchResult(result)
     );
   }
@@ -277,7 +279,7 @@ class MusicBrainzAPI extends ExternalAPI {
     }
 
     const response = await this.getRolling<
-      MbSearchResponse<MbReleaseSearchResult>
+      MbSearchResponse<'releases', MbReleaseSearchResult>
     >(
       '/release',
       {
@@ -291,7 +293,7 @@ class MusicBrainzAPI extends ExternalAPI {
       3600
     );
 
-    return response.results.map((result) =>
+    return mbResults(response, 'releases').map((result) =>
       this.mapReleaseSearchResult(result)
     );
   }
@@ -325,13 +327,18 @@ class MusicBrainzAPI extends ExternalAPI {
 
   /**
    * List an artist's releases for the artist page's album grid.
+   *
+   * `artistName` is accepted because the `artist=` browse parameter does not return
+   * artist credits, so the name is not otherwise available at this call site.
    */
   public async getArtistReleases({
     artistMbid,
+    artistName,
     limit = 50,
     offset = 0,
   }: {
     artistMbid: string;
+    artistName?: string;
     limit?: number;
     offset?: number;
   }): Promise<MusicBrainzRelease[]> {
@@ -340,7 +347,7 @@ class MusicBrainzAPI extends ExternalAPI {
     }
 
     const response = await this.getRolling<
-      MbSearchResponse<MbReleaseSearchResult>
+      MbSearchResponse<'releases', MbReleaseSearchResult>
     >(
       '/release',
       {
@@ -357,13 +364,14 @@ class MusicBrainzAPI extends ExternalAPI {
     );
 
     return (
-      response.results
+      mbResults(response, 'releases')
         .map((result) => this.mapReleaseSearchResult(result))
-        // Artist credits are sometimes omitted on release searches even with the artist
-        // filter applied; fall back to a label rather than dropping the release.
+        // The `artist=` browse parameter does not return artist credits, so fall back
+        // to the artist the caller asked for rather than dropping the release.
         .map((release) => ({
           ...release,
-          artistName: release.artistName || 'Unknown Artist',
+          artistName: release.artistName || artistName || '',
+          artistId: release.artistId || artistMbid,
         }))
     );
   }
@@ -387,7 +395,7 @@ class MusicBrainzAPI extends ExternalAPI {
     }
 
     const response = await this.getRolling<
-      MbSearchResponse<MbArtistSearchResult>
+      MbSearchResponse<'artists', MbArtistSearchResult>
     >(
       '/artist',
       {
@@ -401,7 +409,7 @@ class MusicBrainzAPI extends ExternalAPI {
       3600
     );
 
-    return response.results.map((result) => ({
+    return mbResults(response, 'artists').map((result) => ({
       id: result.id,
       name: result.name,
       sortName: result['sort-name'],
@@ -452,17 +460,8 @@ class MusicBrainzAPI extends ExternalAPI {
       status: release.status,
       rating: release.rating ?? undefined,
       disambiguation: release.disambiguation,
-      trackCount: release['recording-count'] ?? release.tracks?.length,
-      tracks: (release.tracks ?? release.recording ?? []).map((track) => ({
-        id: track.recording?.id ?? track.id,
-        title: track.title,
-        // Prefer the printed track number over array order: multi-disc releases and
-        // preorders can make positional order differ from what is on the sleeve.
-        trackNumber: track.number
-          ? Number(track.number)
-          : (track.position ?? 0),
-        length: track.recording?.length ?? track.length,
-      })),
+      trackCount: release['recording-count'],
+      tracks: flattenReleaseTracks(release.media),
       coverArt: buildCoverArtUrl(release.id, 'front-500'),
     };
   }
@@ -500,6 +499,32 @@ export const buildCoverArtUrl = (
   }
 
   return `${COVER_ART_ARCHIVE_BASE_URL}/release/${mbid}/${size}`;
+};
+
+/**
+ * Flatten a release's per-disc track lists into one release-wide listing.
+ *
+ * MusicBrainz nests tracks under `media[]` (one entry per disc) rather than exposing
+ * them on the release, and gives each medium a `track-offset` so track numbers stay
+ * unique across a multi-disc set.
+ */
+const flattenReleaseTracks = (media?: MbReleaseMedia[]): MusicBrainzTrack[] => {
+  if (!media?.length) {
+    return [];
+  }
+
+  return media.flatMap((medium) =>
+    (medium.tracks ?? []).map((track) => ({
+      id: track.recording?.id ?? track.id,
+      title: track.title,
+      // Prefer the printed track number over array order: multi-disc releases and
+      // preorders can make positional order differ from what is on the sleeve.
+      trackNumber:
+        (medium['track-offset'] ?? 0) +
+        (track.number ? Number(track.number) : (track.position ?? 0)),
+      length: track.recording?.length ?? track.length,
+    }))
+  );
 };
 
 /**

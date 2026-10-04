@@ -39,8 +39,17 @@ artistRoutes.get('/:mbid', async (req, res, next) => {
 artistRoutes.get('/:mbid/releases', async (req, res, next) => {
   try {
     const musicbrainz = new MusicBrainz();
+    const artist = await musicbrainz.getArtist({ artistMbid: req.params.mbid });
+
+    if (!artist) {
+      return next({ status: 404, message: 'Artist not found.' });
+    }
+
+    // The `artist=` browse does not return artist credits, so the resolved name is
+    // passed through to keep each release attributed correctly.
     const releases = await musicbrainz.getArtistReleases({
       artistMbid: req.params.mbid,
+      artistName: artist.name,
       limit: Number(req.query.limit ?? 50),
       offset: Number(req.query.offset ?? 0),
     });

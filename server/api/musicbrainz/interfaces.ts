@@ -75,6 +75,18 @@ export interface MbRecording {
   video?: string;
 }
 
+export interface MbReleaseMedia {
+  id?: string;
+  format?: string;
+  title?: string;
+  position?: number;
+  'disc-count'?: number;
+  'track-count'?: number;
+  /** Offset of this medium's first track within the release, for multi-disc sets. */
+  'track-offset'?: number;
+  tracks?: MbReleaseTrack[];
+}
+
 export interface MbReleaseDetails {
   id: string;
   title: string;
@@ -88,15 +100,22 @@ export interface MbReleaseDetails {
   'release-group'?: MbReleaseGroup;
   artist?: MbEntity;
   'artist-credit'?: MbArtistCreditSearch[];
-  media?: MbMedia[];
+  /**
+   * One entry per disc. The track list lives here, not on the release itself.
+   */
+  media?: MbReleaseMedia[];
   label?: { id: string; name: string }[];
   'label-info'?: {
     'catalog-number'?: string;
     label?: { id: string; name: string };
   }[];
-  recording?: MbReleaseTrack[];
   'recording-count'?: number;
-  tracks?: MbReleaseTrack[];
+  'cover-art-archive'?: {
+    artwork?: boolean;
+    front?: boolean;
+    back?: boolean;
+    count?: number;
+  };
 }
 
 export interface MbArtistDetails {
@@ -144,10 +163,32 @@ export interface MbArtistSearchResult {
   releases?: MbReleaseSearchResult[];
 }
 
-/** Search response envelope. */
-export interface MbSearchResponse<T> {
+/**
+ * Search response envelope.
+ *
+ * MusicBrainz keys the result array by entity type (`releases`, `artists`, ...) rather
+ * than a uniform `results` field, and the paging fields are inconsistent between
+ * endpoints: browse endpoints use `release-count`/`release-offset` while search
+ * endpoints use `count`/`offset`. The key is a generic parameter and the result list is
+ * exposed through `mbResults`, so a mismatch is caught at the call site instead of the
+ * list silently being undefined at runtime.
+ */
+export type MbSearchResponse<TKey extends string, T> = {
   created?: string;
-  count: number;
-  offset: number;
-  results: T[];
-}
+  /** Search endpoints report totals as `count`. */
+  count?: number;
+  /** Search endpoints report the offset as `offset`. */
+  offset?: number;
+} & Partial<Record<TKey, T[]>> &
+  Record<string, unknown>;
+
+/**
+ * Extract the result list from a search envelope.
+ *
+ * Falls back to an empty array so a missing or renamed key degrades to "no results"
+ * rather than throwing on `.map`.
+ */
+export const mbResults = <TKey extends string, T>(
+  response: MbSearchResponse<TKey, T>,
+  key: TKey
+): T[] => (response[key] as T[] | undefined) ?? [];
