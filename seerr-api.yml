@@ -1435,7 +1435,6 @@ components:
           nullable: true
           description: Cover Art Archive front cover URL, or null when unavailable
         mediaInfo:
-          nullable: true
           $ref: '#/components/schemas/MediaInfo'
     MusicDetails:
       type: object
@@ -1474,7 +1473,6 @@ components:
           type: string
           nullable: true
         mediaInfo:
-          nullable: true
           $ref: '#/components/schemas/MediaInfo'
     Track:
       type: object
