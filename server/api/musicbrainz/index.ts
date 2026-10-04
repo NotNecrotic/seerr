@@ -1,6 +1,7 @@
 import ExternalAPI from '@server/api/externalapi';
 import cacheManager from '@server/lib/cache';
 import { getSettings } from '@server/lib/settings';
+import { getAppVersion } from '@server/utils/appVersion';
 import type {
   MbArtistDetails,
   MbArtistSearchResult,
@@ -16,6 +17,23 @@ import type {
  * read off an API response.
  */
 const COVER_ART_ARCHIVE_BASE_URL = 'https://coverartarchive.org';
+
+/**
+ * Build the User-Agent sent to MetaBrainz services.
+ *
+ * MetaBrainz requires `ApplicationName/version (contact-url-or-email)` and warns that
+ * requests without a valid agent may be blocked without notice. Several third-party
+ * clients were IP-blocked in 2026 over this, so the version is included and the
+ * application URL is preferred when configured.
+ */
+const buildUserAgent = (): string => {
+  const settings = getSettings();
+  const contact =
+    settings.main.applicationUrl || 'https://docs.seerr.dev';
+  const version = getAppVersion();
+
+  return `Seerr/${version} (${contact})`;
+};
 
 export interface MusicBrainzTrack {
   id: string;
@@ -86,8 +104,9 @@ class MusicBrainzAPI extends ExternalAPI {
         nodeCache: cacheManager.getCache('musicbrainz').data,
         timeout,
         headers: {
-          // MusicBrainz blocks generic agents; identify the app and allow contact.
-          'User-Agent': `${getSettings().main.applicationTitle} (Seerr; +https://docs.seerr.dev)`,
+          // MetaBrainz blocks generic agents; identify the app with a
+          // contactable, versioned string.
+          'User-Agent': buildUserAgent(),
           Accept: 'application/json',
         },
       }
