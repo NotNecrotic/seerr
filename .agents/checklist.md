@@ -103,3 +103,10 @@ Plan: `plan.md` · Progress: `progress.md`
       release id; end-to-end Lidarr availability matching is still unproven
 - [ ] Per-item Plex music GUID extraction and Jellyfin music-library scanning
 - [ ] ListenBrainz popularity sorting waits on an optional admin token
+## Phase 12 - Rate limiting fix
+- [x] Reproduced: 25 concurrent MusicBrainz requests => 10 returned 503
+- [x] Enabled `rateLimit` (1 req/s) on the MusicBrainz client
+- [x] Retry throttled responses, honouring `Retry-After` (cap 10s, 3 attempts)
+- [x] `describeApiError()` so rate-limit failures no longer log an empty message
+- [x] Verified 10 concurrent searches resolve 10/10 after the fix
+- [x] 235 tests, 24 client checks, 27 route checks pass

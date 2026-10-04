@@ -235,3 +235,22 @@ install it locally with `pnpm add --save-dev jsdom --config.engine-strict=false`
   `--no-verify`; lint-staged has already run and passed by the time the hook fires.
 - `next dev` misdetects the workspace root (it picks up a lockfile in the parent home
   directory) and hangs while compiling, so it is not a usable way to verify UI changes.
+## Rate limiting (intermittent music search failures)
+
+- Symptom: "Something went wrong loading music releases" with a logged
+  ``errorMessage: ""``.
+- The query was not at fault. MusicBrainz throttles anonymous clients to roughly
+  **1 request/second per source IP** and answers faster requests with **503** plus a
+  JSON ``{"error": ...}`` body and a ``Retry-After`` header.
+- Reproduced with 25 concurrent requests: **10 returned 503**.
+- Causes: the client never enabled the ``rateLimit`` option that ``ExternalAPI``
+  already supports, and nothing retried throttled responses. Axios also leaves
+  ``message`` empty for these responses (detail lives in ``response``), which is why
+  the log line was blank and hid the cause.
+- Fix: throttle to 1 req/s, retry throttled responses honouring ``Retry-After``
+  (capped at 10s, 3 attempts, body checked for a rate-limit message since 503 also
+  covers ordinary unavailability), and log via ``describeApiError()``.
+- After the fix, 10 concurrent searches resolve **10/10**.
+- Note: bursty page loads are the trigger, so this reproduces most easily right
+  after a restart or when several pages are opened at once, which is why it looked
+  query-specific.
