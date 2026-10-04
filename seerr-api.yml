@@ -1277,6 +1277,19 @@ components:
           type: boolean
           example: false
           description: If true, this request will not count against the user's quota. Requires MANAGE_REQUESTS permission.
+        tracks:
+          type: array
+          nullable: true
+          description: Requested tracks for music requests
+          items:
+            type: object
+            properties:
+              id:
+                type: number
+              trackNumber:
+                type: number
+              status:
+                type: number
       required:
         - id
         - status
@@ -1381,6 +1394,198 @@ components:
         twitterId:
           type: string
           nullable: true
+    MusicReleaseResult:
+      type: object
+      properties:
+        id:
+          type: string
+          description: MusicBrainz release ID
+          example: '1c2a5b8e-3f5b-4b9c-9b4a-2a7f5f0a1b3c'
+        mediaType:
+          type: string
+          enum: [music]
+        title:
+          type: string
+          example: 'Random Access Memories'
+        artistName:
+          type: string
+          example: 'Daft Punk'
+        artistId:
+          type: string
+          example: 'a74b1b7f-71a5-4011-9441-d0b5e4122711'
+        releaseGroupId:
+          type: string
+          description: |
+            MusicBrainz release-group ID. Lidarr keys albums off this rather than the
+            release ID.
+        date:
+          type: string
+          nullable: true
+          example: '2013-05-17'
+        posterPath:
+          type: string
+          nullable: true
+          description: Cover Art Archive front cover URL, or null when unavailable
+        mediaInfo:
+          nullable: true
+          $ref: '#/components/schemas/MediaInfo'
+    MusicDetails:
+      type: object
+      properties:
+        id:
+          type: string
+          example: '1c2a5b8e-3f5b-4b9c-9b4a-2a7f5f0a1b3c'
+        title:
+          type: string
+        artistName:
+          type: string
+        artistId:
+          type: string
+        releaseGroupId:
+          type: string
+        date:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        disambiguation:
+          type: string
+          nullable: true
+        trackCount:
+          type: number
+          nullable: true
+        tracks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Track'
+        posterPath:
+          type: string
+          nullable: true
+        mediaInfo:
+          nullable: true
+          $ref: '#/components/schemas/MediaInfo'
+    Track:
+      type: object
+      properties:
+        id:
+          type: string
+          description: MusicBrainz recording ID
+        title:
+          type: string
+        trackNumber:
+          type: number
+          description: 1-indexed position within the release
+        length:
+          type: number
+          nullable: true
+        status:
+          type: number
+          nullable: true
+          description: Media status, when Seerr tracks this track
+    Artist:
+      type: object
+      properties:
+        id:
+          type: string
+          example: 'a74b1b7f-71a5-4011-9441-d0b5e4122711'
+        name:
+          type: string
+        sortName:
+          type: string
+          nullable: true
+        type:
+          type: string
+          nullable: true
+          example: Group
+        country:
+          type: string
+          nullable: true
+        disambiguation:
+          type: string
+          nullable: true
+        begin:
+          type: string
+          nullable: true
+        end:
+          type: string
+          nullable: true
+        firstReleaseDate:
+          type: string
+          nullable: true
+        genres:
+          type: array
+          items:
+            type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        coverArt:
+          type: string
+          nullable: true
+          description: Cover Art Archive artist image URL, or null when unavailable
+    LidarrSettings:
+      type: object
+      properties:
+        id:
+          type: number
+          example: 0
+          readOnly: true
+        name:
+          type: string
+          example: 'Lidarr Main'
+        hostname:
+          type: string
+          example: '127.0.0.1'
+        port:
+          type: number
+          example: 8686
+        apiKey:
+          type: string
+          example: 'exampleapikey'
+        useSsl:
+          type: boolean
+          example: false
+        baseUrl:
+          type: string
+        externalUrl:
+          type: string
+          nullable: true
+        activeProfileId:
+          type: number
+          example: 1
+        activeProfileName:
+          type: string
+          example: MP3-320
+        activeDirectory:
+          type: string
+          example: '/music/'
+        tags:
+          type: array
+          items:
+            type: number
+          nullable: true
+        syncEnabled:
+          type: boolean
+          example: true
+        preventSearch:
+          type: boolean
+          example: false
+        tagRequests:
+          type: boolean
+          example: false
+        overrideRule:
+          type: array
+          items:
+            type: number
+          nullable: true
+        isDefault:
+          type: boolean
+          example: true
     ServiceProfile:
       type: object
       properties:
@@ -3006,6 +3211,128 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/ServiceProfile'
+  /settings/lidarr:
+    get:
+      summary: Get Lidarr settings
+      description: Returns all Lidarr settings in a JSON array.
+      tags:
+        - settings
+      responses:
+        '200':
+          description: 'Values were returned'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LidarrSettings'
+    post:
+      summary: Create Lidarr instance
+      description: Creates a new Lidarr instance from the request body.
+      tags:
+        - settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LidarrSettings'
+      responses:
+        '201':
+          description: 'New Lidarr instance created'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LidarrSettings'
+  /settings/lidarr/test:
+    post:
+      summary: Test Lidarr configuration
+      description: Tests if the Lidarr configuration is valid. Returns profiles and root folders on success.
+      tags:
+        - settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hostname:
+                  type: string
+                  example: '127.0.0.1'
+                port:
+                  type: number
+                  example: 8686
+                apiKey:
+                  type: string
+                  example: yourapikey
+                useSsl:
+                  type: boolean
+                  example: false
+                baseUrl:
+                  type: string
+              required:
+                - hostname
+                - port
+                - apiKey
+                - useSsl
+      responses:
+        '200':
+          description: Succesfully connected to Lidarr instance
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceProfile'
+  /settings/lidarr/{lidarrId}:
+    put:
+      summary: Update Lidarr instance
+      description: Updates an existing Lidarr instance with the provided values.
+      tags:
+        - settings
+      parameters:
+        - in: path
+          name: lidarrId
+          required: true
+          schema:
+            type: integer
+          description: Lidarr instance ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LidarrSettings'
+      responses:
+        '200':
+          description: 'Lidarr instance updated'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LidarrSettings'
+    delete:
+      summary: Delete Lidarr instance
+      description: Deletes an existing Lidarr instance based on the lidarrId parameter.
+      tags:
+        - settings
+      parameters:
+        - in: path
+          name: lidarrId
+          required: true
+          schema:
+            type: integer
+          description: Lidarr instance ID
+      responses:
+        '200':
+          description: Lidarr instance deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LidarrSettings'
   /settings/sonarr/{sonarrId}:
     put:
       summary: Update Sonarr instance
@@ -5540,6 +5867,192 @@ paths:
                         - $ref: '#/components/schemas/MovieResult'
                         - $ref: '#/components/schemas/TvResult'
                         - $ref: '#/components/schemas/PersonResult'
+  /search/music:
+    get:
+      summary: Search for music releases
+      description: |
+        Searches MusicBrainz for releases (albums). Unlike the other search endpoints,
+        this resolves against MusicBrainz rather than TMDB, so results carry a
+        MusicBrainz release id instead of a TMDB id.
+      tags:
+        - search
+      parameters:
+        - in: query
+          name: query
+          required: true
+          schema:
+            type: string
+            example: 'random access memories'
+        - in: query
+          name: page
+          schema:
+            type: number
+            example: 0
+            default: 0
+      responses:
+        '200':
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    type: number
+                    example: 1
+                  totalPages:
+                    type: number
+                    example: 1
+                  totalResults:
+                    type: number
+                    example: 20
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MusicReleaseResult'
+  /search/artist:
+    get:
+      summary: Search for music artists
+      description: Searches MusicBrainz for artists.
+      tags:
+        - search
+      parameters:
+        - in: query
+          name: query
+          required: true
+          schema:
+            type: string
+            example: 'Daft Punk'
+        - in: query
+          name: page
+          schema:
+            type: number
+            example: 0
+            default: 0
+      responses:
+        '200':
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    type: number
+                    example: 1
+                  totalPages:
+                    type: number
+                    example: 1
+                  totalResults:
+                    type: number
+                    example: 20
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Artist'
+  /music/{mbid}:
+    get:
+      summary: Get a music release
+      description: |
+        Returns a single release from MusicBrainz, including its track listing and, when
+        one exists in Seerr, the associated request and availability state.
+      tags:
+        - music
+      parameters:
+        - in: path
+          name: mbid
+          required: true
+          schema:
+            type: string
+          description: MusicBrainz release ID
+      responses:
+        '200':
+          description: Release
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MusicDetails'
+  /music/{mbid}/tracks:
+    get:
+      summary: Get the tracks of a music release
+      description: Returns the track listing for a release, including per-track availability.
+      tags:
+        - music
+      parameters:
+        - in: path
+          name: mbid
+          required: true
+          schema:
+            type: string
+          description: MusicBrainz release ID
+      responses:
+        '200':
+          description: Tracks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  tracks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Track'
+  /artist/{mbid}:
+    get:
+      summary: Get a music artist
+      description: Returns artist details from MusicBrainz.
+      tags:
+        - music
+      parameters:
+        - in: path
+          name: mbid
+          required: true
+          schema:
+            type: string
+          description: MusicBrainz artist ID
+      responses:
+        '200':
+          description: Artist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artist'
+        '404':
+          description: Artist not found
+  /artist/{mbid}/releases:
+    get:
+      summary: Get an artist's releases
+      description: Returns an artist's releases for the artist page's album grid.
+      tags:
+        - music
+      parameters:
+        - in: path
+          name: mbid
+          required: true
+          schema:
+            type: string
+          description: MusicBrainz artist ID
+        - in: query
+          name: limit
+          schema:
+            type: number
+            example: 50
+        - in: query
+          name: offset
+          schema:
+            type: number
+            example: 0
+      responses:
+        '200':
+          description: Releases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MusicReleaseResult'
   /search/keyword:
     get:
       summary: Search for keywords
@@ -6581,11 +7094,17 @@ paths:
               properties:
                 mediaType:
                   type: string
-                  enum: [movie, tv]
+                  enum: [movie, tv, music]
                   example: movie
                 mediaId:
                   type: number
                   example: 123
+                musicBrainzId:
+                  type: string
+                  description: |
+                    MusicBrainz release ID. Required for music requests, which have no
+                    TMDB equivalent and are keyed on `musicBrainzId` instead of `mediaId`.
+                  example: '1c2a5b8e-3f5b-4b9c-9b4a-2a7f5f0a1b3c'
                 tvdbId:
                   type: number
                   example: 123
@@ -6595,6 +7114,17 @@ paths:
                       items:
                         type: number
                         minimum: 0
+                    - type: string
+                      enum: [all]
+                tracks:
+                  description: |
+                    Track numbers to request within a music release. Mirrors `seasons`;
+                    `'all'` requests every track.
+                  oneOf:
+                    - type: array
+                      items:
+                        type: number
+                        minimum: 1
                     - type: string
                       enum: [all]
                 is4k:
@@ -7557,6 +8087,46 @@ paths:
                 properties:
                   server:
                     $ref: '#/components/schemas/SonarrSettings'
+                  profiles:
+                    $ref: '#/components/schemas/ServiceProfile'
+  /service/lidarr:
+    get:
+      summary: Get non-sensitive Lidarr server list
+      description: Returns a list of Lidarr server IDs and names in a JSON object.
+      tags:
+        - service
+      responses:
+        '200':
+          description: Lidarr servers returned
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LidarrSettings'
+  /service/lidarr/{lidarrId}:
+    get:
+      summary: Get Lidarr server quality profiles and root folders
+      description: Returns a Lidarr server's quality profile and root folder details in a JSON object.
+      tags:
+        - service
+      parameters:
+        - in: path
+          name: lidarrId
+          required: true
+          schema:
+            type: number
+            example: 0
+      responses:
+        '200':
+          description: Request successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server:
+                    $ref: '#/components/schemas/LidarrSettings'
                   profiles:
                     $ref: '#/components/schemas/ServiceProfile'
   /service/sonarr/lookup/{tmdbId}:

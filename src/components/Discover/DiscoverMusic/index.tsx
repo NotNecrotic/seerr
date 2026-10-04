@@ -35,15 +35,19 @@ const DiscoverMusic = () => {
     typeof router.query.query === 'string' ? router.query.query : ''
   );
 
+  const canRequestMusic = hasPermission(
+    [Permission.REQUEST, Permission.REQUEST_MUSIC],
+    { type: 'or' }
+  );
+  const trimmedSearch = searchTerm.trim();
+
+  // MusicBrainz is rate limited to roughly 1 request per second, so only query once
+  // there is an actual term rather than on every keystroke or on page load.
   const { data, error } = useSWR<{
     results: MusicSearchResult[];
   }>(
-    hasPermission(Permission.REQUEST_MOVIE) ||
-      hasPermission(Permission.REQUEST_TV) ||
-      hasPermission([Permission.REQUEST, Permission.REQUEST_MUSIC], {
-        type: 'or',
-      })
-      ? `/api/v1/search/music?query=${encodeURIComponent(searchTerm)}`
+    canRequestMusic && trimmedSearch
+      ? `/api/v1/search/music?query=${encodeURIComponent(trimmedSearch)}`
       : null,
     { revalidateOnFocus: false }
   );
