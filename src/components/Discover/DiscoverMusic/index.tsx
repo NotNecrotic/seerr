@@ -30,7 +30,6 @@ const messages = defineMessages('components.Discover.DiscoverMusic', {
   sortRatingDesc: 'MusicBrainz Rating Descending',
   sortTitleAsc: 'Title (A-Z) Ascending',
   sortTitleDesc: 'Title (Z-A) Descending',
-  searchplaceholder: 'Search MusicBrainz for an album…',
   loaderror: 'Something went wrong loading music releases.',
   nopopularity:
     'Popularity sorting requires a ListenBrainz user token in Settings → General. Showing release date order instead.',
@@ -157,28 +156,6 @@ const DiscoverMusic = () => {
           {intl.formatMessage(messages.nopopularity)}
         </p>
       )}
-      <div className="mb-6 flex w-full items-center justify-center">
-        <label htmlFor="music-search" className="sr-only">
-          {intl.formatMessage(messages.searchplaceholder)}
-        </label>
-        <input
-          id="music-search"
-          type="search"
-          autoComplete="off"
-          placeholder={intl.formatMessage(messages.searchplaceholder)}
-          className="block w-full max-w-xl rounded-full border border-gray-600 bg-gray-900/80 px-4 py-2 text-white placeholder-gray-300 hover:border-gray-500 focus:border-gray-500 focus:bg-gray-900 focus:outline-none focus:ring-0 sm:text-base"
-          defaultValue={router.query.query as string}
-          onKeyUp={(e) => {
-            if (e.key === 'Enter') {
-              router.push(
-                `/search?query=${encodeURIComponent(
-                  (e.target as HTMLInputElement).value
-                )}`
-              );
-            }
-          }}
-        />
-      </div>
       <ListView
         musicItems={titles}
         isEmpty={isEmpty}
