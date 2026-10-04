@@ -6,15 +6,70 @@ import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { findSearchProvider } from '@server/lib/search';
 import logger from '@server/logger';
-import { mapReleaseSearchResult } from '@server/models/Music';
-import { mapSearchResults } from '@server/models/Search';
+import {
+  mapArtistSearchResult,
+  mapReleaseSearchResult,
+} from '@server/models/Music';
+import { mapSearchResults, type Results } from '@server/models/Search';
 import { Router } from 'express';
 
 const searchRoutes = Router();
 
+/**
+ * Music results for a query, mapped to the same shape as TMDB results.
+ *
+ * Failures are swallowed so an unreachable MusicBrainz still returns TMDB results
+ * rather than failing the whole search.
+ */
+const getMusicResults = async (
+  queryString: string,
+  page: number
+): Promise<Results[]> => {
+  const musicbrainz = new MusicBrainz();
+
+  try {
+    const [releases, artists] = await Promise.all([
+      musicbrainz.searchReleases({
+        query: queryString,
+        limit: 20,
+        offset: (page - 1) * 20,
+      }),
+      musicbrainz.searchArtists({
+        query: queryString,
+        limit: 20,
+        offset: (page - 1) * 20,
+      }),
+    ]);
+
+    // Attach Seerr-side request/availability state. Music rows are keyed on
+    // musicBrainzId rather than tmdbId, so this cannot use getRelatedMedia.
+    const mediaRepository = getRepository(Media);
+    const media = await mediaRepository.find({
+      where: { mediaType: MediaType.MUSIC },
+    });
+    const mediaByReleaseId = new Map(media.map((m) => [m.musicBrainzId, m]));
+
+    return [
+      ...releases.map((release) =>
+        mapReleaseSearchResult(release, mediaByReleaseId.get(release.id))
+      ),
+      ...artists.map(mapArtistSearchResult),
+    ];
+  } catch (e) {
+    logger.debug('Something went wrong retrieving music search results', {
+      label: 'API',
+      errorMessage: e.message,
+      query: queryString,
+    });
+
+    return [];
+  }
+};
+
 searchRoutes.get('/', async (req, res, next) => {
   const queryString = req.query.query as string;
   const searchProvider = findSearchProvider(queryString.toLowerCase());
+  const page = Number(req.query.page ?? 1) || 1;
   let results: TmdbSearchMultiResponse;
 
   try {
@@ -45,11 +100,19 @@ searchRoutes.get('/', async (req, res, next) => {
       }))
     );
 
+    const mappedResults = mapSearchResults(results.results, media);
+
+    // Music lives in MusicBrainz rather than TMDB, so it is resolved separately and
+    // merged into the same envelope. It is fetched concurrently with the TMDB work
+    // above; `getMusicResults` swallows its own errors so a MusicBrainz outage
+    // degrades to TMDB-only results rather than a 500.
+    const musicResults = await getMusicResults(queryString, page);
+
     return res.status(200).json({
       page: results.page,
       totalPages: results.total_pages,
-      totalResults: results.total_results,
-      results: mapSearchResults(results.results, media),
+      totalResults: results.total_results + musicResults.length,
+      results: [...mappedResults, ...musicResults],
     });
   } catch (e) {
     logger.debug('Something went wrong retrieving search results', {

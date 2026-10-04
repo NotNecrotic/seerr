@@ -1,3 +1,4 @@
+import ArtistCard from '@app/components/ArtistCard';
 import PersonCard from '@app/components/PersonCard';
 import TitleCard from '@app/components/TitleCard';
 import TmdbTitleCard from '@app/components/TitleCard/TmdbTitleCard';
@@ -6,7 +7,10 @@ import useVerticalScroll from '@app/hooks/useVerticalScroll';
 import globalMessages from '@app/i18n/globalMessages';
 import { MediaStatus } from '@server/constants/media';
 import type { WatchlistItem } from '@server/interfaces/api/discoverInterfaces';
-import type { MusicSearchResult } from '@server/models/Music';
+import type {
+  ArtistSearchResult,
+  MusicSearchResult,
+} from '@server/models/Music';
 import type {
   CollectionResult,
   MovieResult,
@@ -22,6 +26,11 @@ interface ListViewProps {
    * different shape (artist name, no TMDB id) and square cover art.
    */
   musicItems?: MusicSearchResult[];
+  /**
+   * Artists are browse-only entities with no requestable Media row, so they render
+   * through their own card rather than `TitleCard`.
+   */
+  artistItems?: ArtistSearchResult[];
   plexItems?: WatchlistItem[];
   isEmpty?: boolean;
   isLoading?: boolean;
@@ -33,6 +42,7 @@ interface ListViewProps {
 const ListView = ({
   items,
   musicItems,
+  artistItems,
   isEmpty,
   isLoading,
   onScrollBottom,
@@ -181,6 +191,17 @@ const ListView = ({
               />
             </li>
           ))}
+        {artistItems?.map((title, index) => (
+          <li key={`artist-${title.id}-${index}`}>
+            <ArtistCard
+              artistId={title.id}
+              name={title.name}
+              subName={title.disambiguation}
+              profilePath={title.posterPath}
+              canExpand
+            />
+          </li>
+        ))}
         {isLoading &&
           !isReachingEnd &&
           [...Array(20)].map((_item, i) => (

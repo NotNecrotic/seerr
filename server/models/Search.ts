@@ -9,6 +9,10 @@ import type {
 } from '@server/api/themoviedb/interfaces';
 import { MediaType as MainMediaType } from '@server/constants/media';
 import type Media from '@server/entity/Media';
+import type {
+  ArtistSearchResult,
+  MusicSearchResult,
+} from '@server/models/Music';
 
 export type MediaType =
   | 'tv'
@@ -74,7 +78,13 @@ export interface PersonResult {
   knownFor: (MovieResult | TvResult)[];
 }
 
-export type Results = MovieResult | TvResult | PersonResult | CollectionResult;
+export type Results =
+  | MovieResult
+  | TvResult
+  | PersonResult
+  | CollectionResult
+  | MusicSearchResult
+  | ArtistSearchResult;
 
 export const mapMovieResult = (
   movieResult: TmdbMovieResult,

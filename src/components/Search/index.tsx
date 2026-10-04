@@ -5,6 +5,10 @@ import useDiscover from '@app/hooks/useDiscover';
 import ErrorPage from '@app/pages/_error';
 import defineMessages from '@app/utils/defineMessages';
 import type {
+  ArtistSearchResult,
+  MusicSearchResult,
+} from '@server/models/Music';
+import type {
   MovieResult,
   PersonResult,
   TvResult,
@@ -16,6 +20,13 @@ const messages = defineMessages('components.Search', {
   search: 'Search',
   searchresults: 'Search Results',
 });
+
+type SearchResult =
+  | MovieResult
+  | TvResult
+  | PersonResult
+  | MusicSearchResult
+  | ArtistSearchResult;
 
 const Search = () => {
   const intl = useIntl();
@@ -29,7 +40,7 @@ const Search = () => {
     titles,
     fetchMore,
     error,
-  } = useDiscover<MovieResult | TvResult | PersonResult>(
+  } = useDiscover<SearchResult>(
     `/api/v1/search`,
     {
       query: router.query.query,
@@ -41,6 +52,18 @@ const Search = () => {
     return <ErrorPage statusCode={500} />;
   }
 
+  // `/api/v1/search` returns TMDB and MusicBrainz results in one envelope, but the
+  // list renders music and artists through their own cards, so split them out here.
+  const tmdbResults = titles.filter(
+    (title) => title.mediaType !== 'music' && title.mediaType !== 'artist'
+  ) as (MovieResult | TvResult | PersonResult)[];
+  const musicResults = titles.filter(
+    (title) => title.mediaType === 'music'
+  ) as MusicSearchResult[];
+  const artistResults = titles.filter(
+    (title) => title.mediaType === 'artist'
+  ) as ArtistSearchResult[];
+
   return (
     <>
       <PageTitle title={intl.formatMessage(messages.search)} />
@@ -48,7 +71,9 @@ const Search = () => {
         <Header>{intl.formatMessage(messages.searchresults)}</Header>
       </div>
       <ListView
-        items={titles}
+        items={tmdbResults}
+        musicItems={musicResults}
+        artistItems={artistResults}
         isEmpty={isEmpty}
         isLoading={
           isLoadingInitialData || (isLoadingMore && (titles?.length ?? 0) > 0)

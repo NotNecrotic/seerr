@@ -51,6 +51,27 @@ export interface MusicSearchResult {
   mediaInfo?: Media;
 }
 
+/**
+ * An artist as a search result.
+ *
+ * Artists are browse-only: there is no requestable Media row, so unlike a person
+ * result this carries no `knownFor` list and no `mediaInfo`.
+ */
+export interface ArtistSearchResult {
+  id: string;
+  mediaType: 'artist';
+  name: string;
+  sortName?: string;
+  type?: string;
+  country?: string;
+  disambiguation?: string;
+  begin?: string;
+  end?: string;
+  firstReleaseDate?: string;
+  genres: string[];
+  posterPath?: string;
+}
+
 export interface ArtistRelease {
   id: string;
   title: string;
@@ -94,6 +115,24 @@ export const mapReleaseSearchResult = (
   date: release.date,
   posterPath: release.coverArt,
   mediaInfo: media,
+});
+
+export const mapArtistSearchResult = (
+  artist: MusicBrainzArtist
+): ArtistSearchResult => ({
+  id: artist.id,
+  mediaType: 'artist',
+  name: artist.name,
+  sortName: artist.sortName,
+  type: artist.type,
+  country: artist.country,
+  disambiguation: artist.disambiguation,
+  begin: artist.begin,
+  end: artist.end,
+  firstReleaseDate: artist.firstReleaseDate,
+  genres: artist.genres ?? [],
+  // The list renderer reads `posterPath`; MusicBrainz names the same field `coverArt`.
+  posterPath: artist.coverArt,
 });
 
 export const mapArtist = (artist: MusicBrainzArtist): MusicBrainzArtist => ({

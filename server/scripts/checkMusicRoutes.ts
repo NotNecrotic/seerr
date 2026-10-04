@@ -131,6 +131,43 @@ const main = async () => {
     )
   );
 
+  console.log('GET /api/v1/search (global, merged TMDB + music)');
+  const global = await get(
+    session,
+    `/api/v1/search?query=${encodeURIComponent('abbey road')}`
+  );
+  check('returns 200', global.status === 200, `status ${global.status}`);
+  const globalResults = arr(global.body);
+  const mediaTypes = [...new Set(globalResults.map((r) => r.mediaType))];
+  check(
+    'merges music results into the TMDB envelope',
+    globalResults.some((r) => r.mediaType === 'music'),
+    `types: ${mediaTypes.join(', ')}`
+  );
+  check(
+    'merges artist results into the TMDB envelope',
+    globalResults.some((r) => r.mediaType === 'artist'),
+    `types: ${mediaTypes.join(', ')}`
+  );
+  check(
+    'music results are shaped for the list',
+    globalResults
+      .filter((r) => r.mediaType === 'music')
+      .every((r) => typeof r.id === 'string' && typeof r.title === 'string')
+  );
+  check(
+    'artist results are shaped for the list',
+    globalResults
+      .filter((r) => r.mediaType === 'artist')
+      .every((r) => typeof r.id === 'string' && typeof r.name === 'string')
+  );
+  check(
+    'artist results carry cover art for the card',
+    globalResults
+      .filter((r) => r.mediaType === 'artist')
+      .some((r) => typeof r.posterPath === 'string')
+  );
+
   console.log('GET /api/v1/search/music');
   const search = await get(session, '/api/v1/search/music?query=abbey%20road');
   check('returns 200', search.status === 200, `status ${search.status}`);

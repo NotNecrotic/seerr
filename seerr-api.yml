@@ -1456,6 +1456,57 @@ components:
           description: Cover Art Archive front cover URL, or null when unavailable
         mediaInfo:
           $ref: '#/components/schemas/MediaInfo'
+    ArtistSearchResult:
+      type: object
+      description: |
+        An artist as it appears in global search results. Artists are browse-only
+        (there is no requestable Media row), so they carry no `mediaInfo`.
+      properties:
+        id:
+          type: string
+          description: MusicBrainz artist ID
+          example: 'a74b1b7f-71a5-4011-9441-d0b5e4122711'
+        mediaType:
+          type: string
+          enum: [artist]
+        name:
+          type: string
+          example: 'Daft Punk'
+        sortName:
+          type: string
+          nullable: true
+          example: 'Daft Punk'
+        type:
+          type: string
+          nullable: true
+          description: MusicBrainz artist type (Group, Person, ...)
+          example: Group
+        country:
+          type: string
+          nullable: true
+          example: FR
+        disambiguation:
+          type: string
+          nullable: true
+        begin:
+          type: string
+          nullable: true
+          example: '1993-11-12'
+        end:
+          type: string
+          nullable: true
+        firstReleaseDate:
+          type: string
+          nullable: true
+          example: '2001-03-07'
+        genres:
+          type: array
+          items:
+            type: string
+        coverArt:
+          type: string
+          nullable: true
+          description: Cover Art Archive front cover URL, or null when unavailable
     MusicDetails:
       type: object
       properties:
@@ -5847,8 +5898,11 @@ paths:
                     type: number
   /search:
     get:
-      summary: Search for movies, TV shows, or people
-      description: Returns a list of movies, TV shows, or people a JSON object.
+      summary: Search for movies, TV shows, music, or people
+      description: |
+        Returns a list of movies, TV shows, people, music releases, or artists. Music is
+        resolved through MusicBrainz in parallel with TMDB and merged into the same
+        envelope.
       tags:
         - search
       parameters:
@@ -5893,6 +5947,8 @@ paths:
                         - $ref: '#/components/schemas/MovieResult'
                         - $ref: '#/components/schemas/TvResult'
                         - $ref: '#/components/schemas/PersonResult'
+                        - $ref: '#/components/schemas/MusicReleaseResult'
+                        - $ref: '#/components/schemas/ArtistSearchResult'
   /search/music:
     get:
       summary: Search for music releases
