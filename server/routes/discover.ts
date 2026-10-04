@@ -1,10 +1,12 @@
+import ListenBrainzAPI from '@server/api/listenbrainz';
+import MusicBrainz from '@server/api/musicbrainz';
 import PlexTvAPI from '@server/api/plextv';
 import TheMovieDb, {
   MovieSortOptionsIterable,
   TvSortOptionsIterable,
 } from '@server/api/themoviedb';
 import type { TmdbKeyword } from '@server/api/themoviedb/interfaces';
-import { MediaType } from '@server/constants/media';
+import { MediaType, MusicSortOptionsIterable } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { User } from '@server/entity/User';
@@ -16,6 +18,7 @@ import type {
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { mapProductionCompany } from '@server/models/Movie';
+import { mapReleaseSearchResult } from '@server/models/Music';
 import {
   mapCollectionResult,
   mapMovieResult,
@@ -100,6 +103,116 @@ const TvApiQuerySchema = QueryFilterOptions.omit({
   certificationMode: true,
 }).extend({
   sortBy: z.enum(TvSortOptionsIterable).optional().catch(undefined),
+});
+
+const MusicApiQuerySchema = z
+  .object({
+    page: z.coerce.number().optional().default(1),
+    genre: z.string().optional(),
+    country: z.string().optional(),
+    label: z.string().optional(),
+    releaseType: z.string().optional(),
+    releaseDateGte: z.string().optional(),
+    releaseDateLte: z.string().optional(),
+  })
+  .extend({
+    sortBy: z.enum(MusicSortOptionsIterable).optional().catch(undefined),
+  });
+
+discoverRoutes.get('/music', async (req, res, next) => {
+  const musicbrainz = new MusicBrainz();
+  const listenbrainz = new ListenBrainzAPI();
+
+  try {
+    const query = MusicApiQuerySchema.parse(req.query);
+    const page = Number(query.page) || 1;
+    // MusicBrainz is rate limited to roughly 1 request per second, so the candidate
+    // pool is bounded rather than paginated server-side.
+    const CANDIDATE_POOL_SIZE = 100;
+    const PAGE_SIZE = 20;
+    const offset = (page - 1) * PAGE_SIZE;
+
+    const releases = await musicbrainz.browseReleases({
+      genre: query.genre,
+      country: query.country,
+      label: query.label,
+      releaseType: query.releaseType,
+      releaseDateGte: query.releaseDateGte,
+      releaseDateLte: query.releaseDateLte,
+      limit: CANDIDATE_POOL_SIZE,
+      offset: 0,
+    });
+
+    // Popularity needs a ListenBrainz token; without one those sorts fall back to
+    // release date rather than returning an arbitrary order.
+    const popularity = listenbrainz.isEnabled()
+      ? await listenbrainz.getReleasePopularity(
+          releases.map((release) => release.id)
+        )
+      : new Map();
+
+    const sortBy =
+      query.sortBy ??
+      (popularity.size > 0 ? 'popularity.desc' : 'releaseDate.desc');
+
+    const listenCount = (mbid: string) =>
+      popularity.get(mbid)?.totalListenCount ?? 0;
+
+    const sorted = [...releases].sort((a, b) => {
+      switch (sortBy) {
+        case 'popularity.asc':
+          return listenCount(a.id) - listenCount(b.id);
+        case 'popularity.desc':
+          return listenCount(b.id) - listenCount(a.id);
+        case 'releaseDate.asc':
+          return (a.date ?? '').localeCompare(b.date ?? '');
+        case 'releaseDate.desc':
+          return (b.date ?? '').localeCompare(a.date ?? '');
+        case 'rating.asc':
+          return (a.rating ?? 0) - (b.rating ?? 0);
+        case 'rating.desc':
+          return (b.rating ?? 0) - (a.rating ?? 0);
+        case 'title.asc':
+          return a.title.localeCompare(b.title);
+        case 'title.desc':
+          return b.title.localeCompare(a.title);
+        default:
+          return 0;
+      }
+    });
+
+    const pageResults = sorted.slice(offset, offset + PAGE_SIZE);
+
+    // Attach Seerr-side request/availability state. Music rows are keyed on
+    // musicBrainzId rather than tmdbId, so getRelatedMedia cannot be used here.
+    const mediaRepository = getRepository(Media);
+    const media = await mediaRepository.find({
+      where: { mediaType: MediaType.MUSIC },
+    });
+    const mediaByReleaseId = new Map(media.map((m) => [m.musicBrainzId, m]));
+
+    return res.status(200).json({
+      page,
+      // The candidate pool bounds how deep the sort can page, which is inherent to
+      // MusicBrainz having no server-side sort.
+      totalPages: Math.max(1, Math.ceil(sorted.length / PAGE_SIZE)),
+      totalResults: sorted.length,
+      results: pageResults.map((release) => ({
+        ...mapReleaseSearchResult(release, mediaByReleaseId.get(release.id)),
+        popularity: listenCount(release.id),
+        rating: release.rating ?? 0,
+      })),
+    });
+  } catch (e) {
+    logger.debug('Something went wrong retrieving music releases', {
+      label: 'API',
+      errorMessage: e.message,
+    });
+    return next({
+      status: 500,
+      message: 'Unable to retrieve music releases.',
+    });
+  }
 });
 
 discoverRoutes.get('/movies', async (req, res, next) => {

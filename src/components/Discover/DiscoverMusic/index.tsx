@@ -1,69 +1,90 @@
+import Button from '@app/components/Common/Button';
 import Header from '@app/components/Common/Header';
 import ListView from '@app/components/Common/ListView';
 import PageTitle from '@app/components/Common/PageTitle';
-import useToasts from '@app/hooks/useToasts';
-import { Permission, useUser } from '@app/hooks/useUser';
-import globalMessages from '@app/i18n/globalMessages';
-import ErrorPage from '@app/pages/_error';
+import MusicFilterSlideover from '@app/components/Discover/MusicFilterSlideover';
+import {
+  countActiveFilters,
+  prepareFilterValues,
+} from '@app/components/Discover/constants';
+import useDiscover from '@app/hooks/useDiscover';
+import useSettings from '@app/hooks/useSettings';
+import { useUpdateQueryParams } from '@app/hooks/useUpdateQueryParams';
 import defineMessages from '@app/utils/defineMessages';
+import { BarsArrowDownIcon, FunnelIcon } from '@heroicons/react/24/solid';
+import type { MusicSortOptions } from '@server/constants/media';
 import type { MusicSearchResult } from '@server/models/Music';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useIntl } from 'react-intl';
-import useSWR from 'swr';
 
 const messages = defineMessages('components.Discover.DiscoverMusic', {
   discovermusic: 'Music',
-  searchplaceholder: 'Search for an album…',
-  introduction:
-    'Search MusicBrainz for an album to request. Music is resolved from MusicBrainz and fulfilled by Lidarr.',
+  activefilters:
+    '{count, plural, one {# Active Filter} other {# Active Filters}}',
+  sortPopularityAsc: 'Popularity Ascending',
+  sortPopularityDesc: 'Popularity Descending',
+  sortReleaseDateAsc: 'Release Date Ascending',
+  sortReleaseDateDesc: 'Release Date Descending',
+  sortRatingAsc: 'MusicBrainz Rating Ascending',
+  sortRatingDesc: 'MusicBrainz Rating Descending',
+  sortTitleAsc: 'Title (A-Z) Ascending',
+  sortTitleDesc: 'Title (Z-A) Descending',
+  searchplaceholder: 'Search MusicBrainz for an album…',
+  loaderror: 'Something went wrong loading music releases.',
+  nopopularity:
+    'Popularity sorting requires a ListenBrainz user token in Settings → General. Showing release date order instead.',
 });
+
+const SortOptions: Record<string, MusicSortOptions> = {
+  PopularityAsc: 'popularity.asc',
+  PopularityDesc: 'popularity.desc',
+  ReleaseDateAsc: 'releaseDate.asc',
+  ReleaseDateDesc: 'releaseDate.desc',
+  RatingAsc: 'rating.asc',
+  RatingDesc: 'rating.desc',
+  TitleAsc: 'title.asc',
+  TitleDesc: 'title.desc',
+} as const;
 
 /**
  * Music discover page.
  *
- * Unlike movies and TV, MusicBrainz has no popularity, trending, or "now playing"
- * feeds, so this is a search-first surface rather than a browsable grid. There is no
- * sort or filter control for the same reason.
+ * Mirrors the movies and shows pages: same ListView, same sort dropdown, and an
+ * equivalent filter slideover backed by MusicBrainz rather than TMDB.
+ *
+ * MusicBrainz has no server-side sort, so the server fetches a bounded candidate pool
+ * and sorts in process. Popularity additionally needs a ListenBrainz token, so those
+ * options are hidden when no token is configured.
  */
 const DiscoverMusic = () => {
   const intl = useIntl();
   const router = useRouter();
-  const { addToast } = useToasts();
-  const { hasPermission } = useUser();
-  const [searchTerm, setSearchTerm] = useState(
-    typeof router.query.query === 'string' ? router.query.query : ''
+  const { currentSettings } = useSettings();
+  const updateQueryParams = useUpdateQueryParams({});
+  const [showFilters, setShowFilters] = useState(false);
+
+  const preparedFilters = prepareFilterValues(router.query);
+
+  const {
+    isLoadingInitialData,
+    isEmpty,
+    isLoadingMore,
+    isReachingEnd,
+    titles,
+    fetchMore,
+    error,
+  } = useDiscover<MusicSearchResult, unknown, { sortBy?: string }>(
+    '/api/v1/discover/music',
+    preparedFilters
   );
 
-  const canRequestMusic = hasPermission(
-    [Permission.REQUEST, Permission.REQUEST_MUSIC],
-    { type: 'or' }
-  );
-  const trimmedSearch = searchTerm.trim();
-
-  // MusicBrainz is rate limited to roughly 1 request per second, so only query once
-  // there is an actual term rather than on every keystroke or on page load.
-  const { data, error } = useSWR<{
-    results: MusicSearchResult[];
-  }>(
-    canRequestMusic && trimmedSearch
-      ? `/api/v1/search/music?query=${encodeURIComponent(trimmedSearch)}`
-      : null,
-    { revalidateOnFocus: false }
-  );
-
-  useEffect(() => {
-    if (error) {
-      addToast(<span>{intl.formatMessage(globalMessages.error)}</span>, {
-        appearance: 'error',
-        autoDismiss: true,
-      });
-    }
-  }, [error, addToast, intl]);
-
-  if (error) {
-    return <ErrorPage statusCode={500} />;
-  }
+  const popularityAvailable = currentSettings.listenbrainzEnabled;
+  const effectiveSort =
+    preparedFilters.sortBy ??
+    (popularityAvailable
+      ? SortOptions.PopularityDesc
+      : SortOptions.ReleaseDateDesc);
 
   const title = intl.formatMessage(messages.discovermusic);
 
@@ -72,10 +93,70 @@ const DiscoverMusic = () => {
       <PageTitle title={title} />
       <div className="mb-4 flex flex-col justify-between lg:flex-row lg:items-end">
         <Header>{title}</Header>
+        <div className="mt-2 flex flex-grow flex-col sm:flex-row lg:flex-grow-0">
+          <div className="mb-2 flex flex-grow sm:mr-2 lg:flex-grow-0">
+            <span className="inline-flex cursor-default items-center rounded-l-md border border-r-0 border-gray-500 bg-gray-800 px-3 text-gray-100 sm:text-sm">
+              <BarsArrowDownIcon className="h-6 w-6" />
+            </span>
+            <select
+              id="sortBy"
+              name="sortBy"
+              className="rounded-r-only"
+              value={effectiveSort}
+              onChange={(e) => updateQueryParams('sortBy', e.target.value)}
+            >
+              {popularityAvailable && (
+                <>
+                  <option value={SortOptions.PopularityDesc}>
+                    {intl.formatMessage(messages.sortPopularityDesc)}
+                  </option>
+                  <option value={SortOptions.PopularityAsc}>
+                    {intl.formatMessage(messages.sortPopularityAsc)}
+                  </option>
+                </>
+              )}
+              <option value={SortOptions.ReleaseDateDesc}>
+                {intl.formatMessage(messages.sortReleaseDateDesc)}
+              </option>
+              <option value={SortOptions.ReleaseDateAsc}>
+                {intl.formatMessage(messages.sortReleaseDateAsc)}
+              </option>
+              <option value={SortOptions.RatingDesc}>
+                {intl.formatMessage(messages.sortRatingDesc)}
+              </option>
+              <option value={SortOptions.RatingAsc}>
+                {intl.formatMessage(messages.sortRatingAsc)}
+              </option>
+              <option value={SortOptions.TitleAsc}>
+                {intl.formatMessage(messages.sortTitleAsc)}
+              </option>
+              <option value={SortOptions.TitleDesc}>
+                {intl.formatMessage(messages.sortTitleDesc)}
+              </option>
+            </select>
+          </div>
+          <div className="mb-2 flex flex-grow sm:mr-2 lg:flex-grow-0">
+            <MusicFilterSlideover
+              show={showFilters}
+              currentFilters={preparedFilters}
+              onClose={() => setShowFilters(false)}
+            />
+            <Button onClick={() => setShowFilters(true)} className="w-full">
+              <FunnelIcon />
+              <span>
+                {intl.formatMessage(messages.activefilters, {
+                  count: countActiveFilters(preparedFilters),
+                })}
+              </span>
+            </Button>
+          </div>
+        </div>
       </div>
-      <p className="mb-6 text-sm text-gray-400">
-        {intl.formatMessage(messages.introduction)}
-      </p>
+      {!popularityAvailable && (
+        <p className="mb-4 text-sm text-amber-400">
+          {intl.formatMessage(messages.nopopularity)}
+        </p>
+      )}
       <div className="mb-6 flex w-full items-center justify-center">
         <label htmlFor="music-search" className="sr-only">
           {intl.formatMessage(messages.searchplaceholder)}
@@ -86,20 +167,32 @@ const DiscoverMusic = () => {
           autoComplete="off"
           placeholder={intl.formatMessage(messages.searchplaceholder)}
           className="block w-full max-w-xl rounded-full border border-gray-600 bg-gray-900/80 px-4 py-2 text-white placeholder-gray-300 hover:border-gray-500 focus:border-gray-500 focus:bg-gray-900 focus:outline-none focus:ring-0 sm:text-base"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          defaultValue={router.query.query as string}
           onKeyUp={(e) => {
             if (e.key === 'Enter') {
-              setSearchTerm(searchTerm.trim());
+              router.push(
+                `/search?query=${encodeURIComponent(
+                  (e.target as HTMLInputElement).value
+                )}`
+              );
             }
           }}
         />
       </div>
       <ListView
-        musicItems={data?.results}
-        isEmpty={!!data && data.results.length === 0}
-        isLoading={!!searchTerm && !data}
+        musicItems={titles}
+        isEmpty={isEmpty}
+        isLoading={
+          isLoadingInitialData || (isLoadingMore && (titles?.length ?? 0) > 0)
+        }
+        isReachingEnd={isReachingEnd}
+        onScrollBottom={fetchMore}
       />
+      {error && (
+        <p className="mt-4 text-center text-sm text-red-400">
+          {intl.formatMessage(messages.loaderror)}
+        </p>
+      )}
     </>
   );
 };

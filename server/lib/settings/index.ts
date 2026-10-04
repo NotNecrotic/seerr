@@ -167,6 +167,12 @@ export interface MainSettings {
   locale: string;
   youtubeUrl: string;
   versionCheck: boolean;
+  /**
+   * Optional ListenBrainz user token, used for music popularity data. ListenBrainz
+   * requires authentication for its popularity endpoints, so popularity sorting is
+   * unavailable until this is set.
+   */
+  listenbrainzToken?: string;
 }
 
 export interface ProxySettings {
@@ -228,6 +234,11 @@ interface FullPublicSettings extends PublicSettings {
   youtubeUrl: string;
   versionCheck: boolean;
   plexClientIdentifier: string;
+  /**
+   * Whether a ListenBrainz token is configured. Exposed so the client can hide the
+   * popularity sorts when they would return nothing, without leaking the token itself.
+   */
+  listenbrainzEnabled: boolean;
 }
 
 export interface NotificationAgentConfig {
@@ -769,6 +780,7 @@ class Settings {
       youtubeUrl: this.data.main.youtubeUrl,
       versionCheck: this.data.main.versionCheck,
       plexClientIdentifier: this.data.clientId,
+      listenbrainzEnabled: !!this.data.main.listenbrainzToken,
     };
   }
 

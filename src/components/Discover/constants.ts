@@ -96,6 +96,11 @@ export const QueryFilterOptions = z.object({
   primaryReleaseDateLte: z.string().optional(),
   firstAirDateGte: z.string().optional(),
   firstAirDateLte: z.string().optional(),
+  releaseDateGte: z.string().optional(),
+  releaseDateLte: z.string().optional(),
+  country: z.string().optional(),
+  label: z.string().optional(),
+  releaseType: z.string().optional(),
   studio: z.string().optional(),
   genre: z.string().optional(),
   keywords: z.string().optional(),
@@ -152,6 +157,26 @@ export const prepareFilterValues = (
 
   if (values.genre) {
     filterValues.genre = values.genre;
+  }
+
+  if (values.releaseDateGte) {
+    filterValues.releaseDateGte = values.releaseDateGte;
+  }
+
+  if (values.releaseDateLte) {
+    filterValues.releaseDateLte = values.releaseDateLte;
+  }
+
+  if (values.country) {
+    filterValues.country = values.country;
+  }
+
+  if (values.label) {
+    filterValues.label = values.label;
+  }
+
+  if (values.releaseType) {
+    filterValues.releaseType = values.releaseType;
   }
 
   if (values.status) {

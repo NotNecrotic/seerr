@@ -256,6 +256,14 @@ components:
         versionCheck:
           type: boolean
           example: false
+        listenbrainzToken:
+          type: string
+          nullable: true
+          description: |
+            Optional ListenBrainz user token, used for music popularity data. Obtain it
+            from your ListenBrainz account settings. Popularity sorting in music
+            discovery is unavailable until this is set.
+          example: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
     NetworkSettings:
       type: object
       properties:
@@ -6133,6 +6141,103 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Company'
+  /discover/music:
+    get:
+      summary: Discover music releases
+      description: |
+        Returns a page of releases from MusicBrainz, sorted in process.
+
+        MusicBrainz has no server-side sort parameter, so results are fetched as a
+        bounded candidate pool and sorted here. Popularity sorting additionally
+        requires a ListenBrainz user token; without one those options fall back to
+        release date.
+      tags:
+        - other
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: number
+            example: 1
+            default: 1
+        - in: query
+          name: genre
+          schema:
+            type: string
+            example: 'trip hop'
+        - in: query
+          name: country
+          schema:
+            type: string
+            example: 'GB'
+        - in: query
+          name: label
+          schema:
+            type: string
+            example: 'Warp Records'
+        - in: query
+          name: releaseType
+          schema:
+            type: string
+            example: 'album'
+        - in: query
+          name: releaseDateGte
+          schema:
+            type: string
+            example: '1990'
+        - in: query
+          name: releaseDateLte
+          schema:
+            type: string
+            example: '2000'
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+            enum:
+              [
+                popularity.asc,
+                popularity.desc,
+                releaseDate.asc,
+                releaseDate.desc,
+                rating.asc,
+                rating.desc,
+                title.asc,
+                title.desc,
+              ]
+            example: popularity.desc
+      responses:
+        '200':
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    type: number
+                    example: 1
+                  totalPages:
+                    type: number
+                    example: 5
+                  totalResults:
+                    type: number
+                    example: 100
+                  results:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/MusicReleaseResult'
+                        - type: object
+                          properties:
+                            popularity:
+                              type: number
+                              description: |
+                                ListenBrainz total listen count, or 0 when no token is
+                                configured or ListenBrainz has no data for this release.
+                            rating:
+                              type: number
+                              description: MusicBrainz community rating, 0-100
   /discover/movies:
     get:
       summary: Discover movies

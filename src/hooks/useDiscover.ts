@@ -15,7 +15,11 @@ export interface BaseSearchResult<T> {
 }
 
 interface BaseMedia {
-  id: number;
+  /**
+   * Identifier used for de-duplication across pages. Movies and TV use a numeric TMDB
+   * id; music uses a MusicBrainz UUID string.
+   */
+  id: number | string;
   mediaType: string;
   mediaInfo?: {
     status: MediaStatus;
@@ -41,6 +45,15 @@ const extraEncodes: [RegExp, string][] = [
   [/!/g, '%21'],
   [/\*/g, '%2A'],
 ];
+
+/**
+ * Media types that carry a Seerr `Media` row and therefore request/availability state.
+ *
+ * People, collections, and artists do not, so availability and request filters are
+ * deliberately skipped for them.
+ */
+const isRequestableMediaType = (mediaType: string): boolean =>
+  mediaType === 'movie' || mediaType === 'tv' || mediaType === 'music';
 
 export const encodeURIExtraParams = (string: string): string => {
   let finalString = encodeURIComponent(string);
@@ -95,7 +108,7 @@ const useDiscover = <
     }
   );
 
-  const resultIds: Set<number> = new Set<number>();
+  const resultIds: Set<number | string> = new Set<number | string>();
 
   const isLoadingInitialData = !data && !error;
   const isLoadingMore =
@@ -125,7 +138,7 @@ const useDiscover = <
   if (settings.currentSettings.hideAvailable && hideAvailable) {
     titles = titles.filter(
       (i) =>
-        !(i.mediaType === 'movie' || i.mediaType === 'tv') ||
+        !isRequestableMediaType(i.mediaType) ||
         (i.mediaInfo?.status !== MediaStatus.AVAILABLE &&
           i.mediaInfo?.status !== MediaStatus.PARTIALLY_AVAILABLE)
     );
@@ -138,14 +151,14 @@ const useDiscover = <
   ) {
     titles = titles.filter(
       (i) =>
-        !(i.mediaType === 'movie' || i.mediaType === 'tv') ||
+        !isRequestableMediaType(i.mediaType) ||
         i.mediaInfo?.status !== MediaStatus.BLOCKLISTED
     );
   }
 
   if (settings.currentSettings.hideRequested && hideRequested) {
     titles = titles.filter((i) => {
-      if (i.mediaType !== 'movie' && i.mediaType !== 'tv') {
+      if (!isRequestableMediaType(i.mediaType)) {
         return true;
       }
 

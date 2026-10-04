@@ -40,6 +40,7 @@ export interface MbReleaseSearchResult {
   country?: string;
   status?: string;
   barcode?: string;
+  rating?: number;
   'text-representation'?: string;
   'release-group'?: MbReleaseGroup;
   artist?: MbEntity;
@@ -81,6 +82,7 @@ export interface MbReleaseDetails {
   country?: string;
   status?: string;
   barcode?: string;
+  rating?: number;
   disambiguation?: string;
   'text-representation'?: string;
   'release-group'?: MbReleaseGroup;

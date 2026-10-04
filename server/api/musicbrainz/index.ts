@@ -28,12 +28,20 @@ const COVER_ART_ARCHIVE_BASE_URL = 'https://coverartarchive.org';
  */
 const buildUserAgent = (): string => {
   const settings = getSettings();
-  const contact =
-    settings.main.applicationUrl || 'https://docs.seerr.dev';
+  const contact = settings.main.applicationUrl || 'https://docs.seerr.dev';
   const version = getAppVersion();
 
   return `Seerr/${version} (${contact})`;
 };
+
+/**
+ * Escape a value for use inside a MusicBrainz Lucene query.
+ *
+ * Filter values come straight from user-supplied query parameters, so unescaped input
+ * would otherwise be able to alter the structure of the query.
+ */
+const escapeLuceneValue = (value: string): string =>
+  value.replace(/([+\-!(){}[\]^"~*?:\\/]|&&|\|\|)/g, '\\$1');
 
 export interface MusicBrainzTrack {
   id: string;
@@ -54,6 +62,14 @@ export interface MusicBrainzRelease {
   country?: string;
   status?: string;
   disambiguation?: string;
+  /**
+   * MusicBrainz community rating, 0-100.
+   *
+   * This is far sparser and less well calibrated than TMDB votes, so the rating sort
+   * produces lopsided results. ListenBrainz `user_count` is the better signal where
+   * a token is configured.
+   */
+  rating?: number;
   /**
    * MusicBrainz has no editorial summary for releases, unlike TMDB's `overview`, so
    * this is only ever populated from a source such as Lidarr or a local tag.
@@ -197,6 +213,90 @@ class MusicBrainzAPI extends ExternalAPI {
   }
 
   /**
+   * Browse releases matching the supplied filters.
+   *
+   * MusicBrainz search accepts Lucene syntax, which lets the date, country, label, and
+   * release-type filters be pushed upstream rather than filtered client-side, so the
+   * candidate pool stays relevant. Note there is no server-side sort: callers must
+   * sort the returned pool themselves.
+   */
+  public async browseReleases({
+    genre,
+    country,
+    label,
+    releaseType,
+    releaseDateGte,
+    releaseDateLte,
+    limit = 100,
+    offset = 0,
+  }: {
+    genre?: string;
+    country?: string;
+    label?: string;
+    releaseType?: string;
+    releaseDateGte?: string;
+    releaseDateLte?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<MusicBrainzRelease[]> {
+    const clauses: string[] = [];
+
+    if (genre) {
+      clauses.push(`tag:"${escapeLuceneValue(genre)}"`);
+    }
+    if (country) {
+      clauses.push(`country:${escapeLuceneValue(country)}`);
+    }
+    if (label) {
+      clauses.push(`label:"${escapeLuceneValue(label)}"`);
+    }
+    if (releaseType) {
+      clauses.push(`primarytype:${escapeLuceneValue(releaseType)}`);
+    }
+
+    if (releaseDateGte || releaseDateLte) {
+      // Only full ISO dates can be used as range bounds; a year alone is matched as a
+      // range instead, since MusicBrainz rejects partial dates in this position.
+      const isFullDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+      const lower = releaseDateGte
+        ? isFullDate(releaseDateGte)
+          ? releaseDateGte
+          : `${releaseDateGte}-01`
+        : '*';
+      const upper = releaseDateLte
+        ? isFullDate(releaseDateLte)
+          ? releaseDateLte
+          : `${releaseDateLte}-12-31`
+        : '*';
+      clauses.push(`date:[${lower} TO ${upper}]`);
+    }
+
+    // Albums only, since Seerr requests releases rather than individual recordings.
+    if (!clauses.some((clause) => clause.startsWith('primarytype:'))) {
+      clauses.push('primarytype:album');
+    }
+
+    const response = await this.getRolling<
+      MbSearchResponse<MbReleaseSearchResult>
+    >(
+      '/release',
+      {
+        params: {
+          query: clauses.join(' AND '),
+          limit,
+          offset,
+          fmt: 'json',
+        },
+      },
+      3600
+    );
+
+    return response.results.map((result) =>
+      this.mapReleaseSearchResult(result)
+    );
+  }
+
+  /**
    * Fetch an artist's details plus their metadata.
    */
   public async getArtist({
@@ -329,6 +429,7 @@ class MusicBrainzAPI extends ExternalAPI {
       date: result.date,
       country: result.country,
       status: result.status,
+      rating: result.rating ?? undefined,
       trackCount:
         result['track-count'] ??
         result.media?.[0]?.['track-count'] ??
@@ -349,6 +450,7 @@ class MusicBrainzAPI extends ExternalAPI {
       date: release.date,
       country: release.country,
       status: release.status,
+      rating: release.rating ?? undefined,
       disambiguation: release.disambiguation,
       trackCount: release['recording-count'] ?? release.tracks?.length,
       tracks: (release.tracks ?? release.recording ?? []).map((track) => ({

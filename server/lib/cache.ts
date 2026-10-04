@@ -12,7 +12,8 @@ export type AvailableCacheIds =
   | 'plextv'
   | 'plexwatchlist'
   | 'tvdb'
-  | 'musicbrainz';
+  | 'musicbrainz'
+  | 'listenbrainz';
 
 const DEFAULT_TTL = 300;
 
@@ -55,6 +56,10 @@ const TVDB_MAX_KEYS = 500;
 // MusicBrainz is the most aggressively rate-limited upstream (roughly 1 req/sec for
 // anonymous clients), so this tier carries the longest TTL of the API caches.
 const MUSICBRAINZ_MAX_KEYS = 1000;
+
+// Popularity lookups are keyed by the batch of release MBIDs requested, which shifts
+// as pages are browsed, so this tier is kept small.
+const LISTENBRAINZ_MAX_KEYS = 200;
 
 export interface CacheStats {
   hits: number;
@@ -262,6 +267,10 @@ class CacheManager {
     musicbrainz: new Cache('musicbrainz', 'The MusicBrainz API', {
       stdTtl: 21600,
       max: MUSICBRAINZ_MAX_KEYS,
+    }),
+    listenbrainz: new Cache('listenbrainz', 'The ListenBrainz API', {
+      stdTtl: 21600,
+      max: LISTENBRAINZ_MAX_KEYS,
     }),
   };
 

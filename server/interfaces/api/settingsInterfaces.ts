@@ -51,6 +51,11 @@ export interface PublicSettingsResponse {
   youtubeUrl: string;
   versionCheck: boolean;
   plexClientIdentifier: string;
+  /**
+   * Whether a ListenBrainz token is configured. Lets the client hide popularity sorts
+   * without needing access to the token itself.
+   */
+  listenbrainzEnabled: boolean;
 }
 
 export interface CacheItem {
