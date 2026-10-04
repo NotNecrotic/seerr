@@ -29,6 +29,10 @@ export enum Permission {
   WATCHLIST_VIEW = 134217728,
   MANAGE_BLOCKLIST = 268435456,
   VIEW_BLOCKLIST = 1073741824,
+  // Music deliberately has no 4K variants: there is no such thing as a 4K album.
+  REQUEST_MUSIC = 2147483648,
+  AUTO_APPROVE_MUSIC = 4294967296,
+  AUTO_REQUEST_MUSIC = 8589934592,
 }
 
 export interface PermissionCheckOptions {

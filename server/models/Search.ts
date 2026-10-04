@@ -10,7 +10,15 @@ import type {
 import { MediaType as MainMediaType } from '@server/constants/media';
 import type Media from '@server/entity/Media';
 
-export type MediaType = 'tv' | 'movie' | 'person' | 'collection';
+export type MediaType =
+  | 'tv'
+  | 'movie'
+  | 'person'
+  | 'collection'
+  // Music entities. Artists are browse-only (mirroring `person`); releases are the
+  // requestable unit and map to a music `Media` row.
+  | 'music'
+  | 'artist';
 
 interface SearchResult {
   id: number;

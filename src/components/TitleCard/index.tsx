@@ -32,6 +32,11 @@ import { mutate } from 'swr';
 
 interface TitleCardProps {
   id: number;
+  /**
+   * MusicBrainz release ID, used in place of `id` for music cards since those ids are
+   * UUIDs rather than integers.
+   */
+  musicId?: string;
   image?: string;
   summary?: string;
   year?: string;
@@ -43,6 +48,13 @@ interface TitleCardProps {
   inProgress?: boolean;
   isAddedToWatchlist?: number | boolean;
   mutateParent?: () => void;
+  /**
+   * Card shape. Music artwork is square while movie and TV posters are vertical, so
+   * this keeps the two visually distinct. Defaults to `poster`, which leaves every
+   * existing call site unchanged; music additionally implies `square` so callers do
+   * not have to remember to pass it.
+   */
+  aspect?: 'poster' | 'square';
 }
 
 const messages = defineMessages('components.TitleCard', {
@@ -57,6 +69,7 @@ const messages = defineMessages('components.TitleCard', {
 
 const TitleCard = ({
   id,
+  musicId,
   image,
   summary,
   year,
@@ -67,10 +80,15 @@ const TitleCard = ({
   inProgress = false,
   canExpand = false,
   mutateParent,
+  aspect,
 }: TitleCardProps) => {
   const isTouch = useIsTouch();
   const intl = useIntl();
   const { user, hasPermission } = useUser();
+  // Music art is square by nature, so treat it as square unless a caller overrides.
+  const resolvedAspect =
+    aspect ?? (mediaType === 'music' ? 'square' : 'poster');
+  const isSquare = resolvedAspect === 'square';
   const [isUpdating, setIsUpdating] = useState(false);
   const [currentStatus, setCurrentStatus] = useState(status);
   const [showDetail, setShowDetail] = useState(false);
@@ -305,7 +323,9 @@ const TitleCard = ({
       Permission.REQUEST,
       mediaType === 'movie' || mediaType === 'collection'
         ? Permission.REQUEST_MOVIE
-        : Permission.REQUEST_TV,
+        : mediaType === 'music'
+          ? Permission.REQUEST_MUSIC
+          : Permission.REQUEST_TV,
     ],
     { type: 'or' }
   );
@@ -316,19 +336,28 @@ const TitleCard = ({
 
   return (
     <div
-      className={canExpand ? 'w-full' : 'w-36 sm:w-36 md:w-44'}
+      className={
+        canExpand
+          ? 'w-full'
+          : isSquare
+            ? 'w-32 sm:w-40 md:w-48'
+            : 'w-36 sm:w-36 md:w-44'
+      }
       data-testid="title-card"
       ref={cardRef}
     >
       <RequestModal
         tmdbId={id}
+        musicBrainzId={musicId}
         show={showRequestModal}
         type={
           mediaType === 'movie'
             ? 'movie'
             : mediaType === 'collection'
               ? 'collection'
-              : 'tv'
+              : mediaType === 'music'
+                ? 'music'
+                : 'tv'
         }
         onComplete={requestComplete}
         onUpdating={requestUpdating}
@@ -355,7 +384,7 @@ const TitleCard = ({
             : 'scale-100 shadow ring-gray-700'
         }`}
         style={{
-          paddingBottom: '150%',
+          paddingBottom: isSquare ? '100%' : '150%',
         }}
         onMouseEnter={() => {
           if (!isTouch) {
@@ -373,24 +402,42 @@ const TitleCard = ({
         tabIndex={0}
       >
         <div className="absolute inset-0 h-full w-full overflow-hidden">
-          <CachedImage
-            type="tmdb"
-            className="absolute inset-0 h-full w-full"
-            alt=""
-            src={
-              image
-                ? `https://image.tmdb.org/t/p/w300_and_h450_face${image}`
-                : `/images/seerr_poster_not_found_logo_top.png`
-            }
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            fill
-          />
+          {isSquare ? (
+            // Cover Art Archive URLs are absolute, unlike TMDB's bare poster paths.
+            <CachedImage
+              type="musicbrainz"
+              className="absolute inset-0 h-full w-full"
+              alt=""
+              src={
+                image ? image : `/images/seerr_poster_not_found_logo_top.png`
+              }
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              fill
+            />
+          ) : (
+            <CachedImage
+              type="tmdb"
+              className="absolute inset-0 h-full w-full"
+              alt=""
+              src={
+                image
+                  ? `https://image.tmdb.org/t/p/w300_and_h450_face${image}`
+                  : `/images/seerr_poster_not_found_logo_top.png`
+              }
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              fill
+            />
+          )}
           <div className="absolute left-0 right-0 flex items-center justify-between p-2">
             <div
               className={`pointer-events-none z-40 self-start rounded-full border shadow-md ${
                 mediaType === 'movie' || mediaType === 'collection'
                   ? 'border-blue-500 bg-blue-600/80'
-                  : 'border-purple-600 bg-purple-600/80'
+                  : mediaType === 'music'
+                    ? 'border-emerald-500 bg-emerald-600/80'
+                    : mediaType === 'artist'
+                      ? 'border-amber-500 bg-amber-600/80'
+                      : 'border-purple-600 bg-purple-600/80'
               }`}
             >
               <div className="flex h-4 items-center px-2 py-2 text-center text-xs font-medium uppercase tracking-wider text-white sm:h-5">
@@ -398,7 +445,11 @@ const TitleCard = ({
                   ? intl.formatMessage(globalMessages.movie)
                   : mediaType === 'collection'
                     ? intl.formatMessage(globalMessages.collection)
-                    : intl.formatMessage(globalMessages.tvshow)}
+                    : mediaType === 'music'
+                      ? intl.formatMessage(globalMessages.music)
+                      : mediaType === 'artist'
+                        ? intl.formatMessage(globalMessages.artist)
+                        : intl.formatMessage(globalMessages.tvshow)}
               </div>
             </div>
             {showDetail && currentStatus !== MediaStatus.BLOCKLISTED && (
@@ -500,7 +551,9 @@ const TitleCard = ({
                     ? `/movie/${id}`
                     : mediaType === 'collection'
                       ? `/collection/${id}`
-                      : `/tv/${id}`
+                      : mediaType === 'music'
+                        ? `/music/${musicId}`
+                        : `/tv/${id}`
                 }
                 className="absolute inset-0 h-full w-full cursor-pointer overflow-hidden text-left"
                 style={{
@@ -542,8 +595,12 @@ const TitleCard = ({
                           (currentStatus &&
                             currentStatus !== MediaStatus.UNKNOWN &&
                             currentStatus !== MediaStatus.DELETED)
-                            ? 5
-                            : 3,
+                            ? isSquare
+                              ? 2
+                              : 5
+                            : isSquare
+                              ? 1
+                              : 3,
                         display: '-webkit-box',
                         overflow: 'hidden',
                         WebkitBoxOrient: 'vertical',

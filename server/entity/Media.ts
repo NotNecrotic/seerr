@@ -1,3 +1,4 @@
+import LidarrAPI from '@server/api/servarr/lidarr';
 import RadarrAPI from '@server/api/servarr/radarr';
 import SonarrAPI from '@server/api/servarr/sonarr';
 import {
@@ -30,6 +31,7 @@ import {
 import Issue from './Issue';
 import { MediaRequest } from './MediaRequest';
 import Season from './Season';
+import Track from './Track';
 
 @Entity()
 @Index(['tmdbId', 'mediaType'])
@@ -132,6 +134,15 @@ class Media {
   @Index()
   public imdbId?: string;
 
+  /**
+   * MusicBrainz ID for music media. Movies and TV use `tmdbId`; music has no TMDB
+   * equivalent, and MusicBrainz IDs are UUIDs rather than integers, so they get their
+   * own column instead of widening `tmdbId`. Uniqueness is scoped by `mediaType`.
+   */
+  @Column({ nullable: true, type: 'varchar' })
+  @Index()
+  public musicBrainzId?: string;
+
   @Column({ type: 'int', default: MediaStatus.UNKNOWN })
   @Index()
   public status: MediaStatus;
@@ -153,6 +164,16 @@ class Media {
     eager: true,
   })
   public seasons: Season[];
+
+  /**
+   * Child tracks for music media. Mirrors `seasons`: TV stores seasons under a series
+   * row, music stores tracks under a release row.
+   */
+  @OneToMany(() => Track, (track) => track.media, {
+    cascade: true,
+    eager: true,
+  })
+  public tracks: Track[];
 
   @OneToMany(() => Issue, (issue) => issue.media, { cascade: true })
   public issues: Issue[];
@@ -370,6 +391,22 @@ class Media {
         }
       }
     }
+
+    if (this.mediaType === MediaType.MUSIC) {
+      // Music has no 4K variant, so only the standard fields are populated.
+      if (this.serviceId !== null && this.externalServiceSlug !== null) {
+        const settings = getSettings();
+        const server = settings.lidarr.find(
+          (lidarr) => lidarr.id === this.serviceId
+        );
+
+        if (server) {
+          this.serviceUrl = server.externalUrl
+            ? `${server.externalUrl}/album/${this.externalServiceSlug}`
+            : LidarrAPI.buildUrl(server, `/album/${this.externalServiceSlug}`);
+        }
+      }
+    }
   }
 
   @AfterLoad()
@@ -422,6 +459,21 @@ class Media {
         this.downloadStatus4k = downloadTracker.getSeriesProgress(
           this.serviceId4k,
           this.externalServiceId4k
+        );
+      }
+    }
+
+    if (this.mediaType === MediaType.MUSIC) {
+      // Music has no 4K variant, so only the standard fields are populated.
+      if (
+        this.externalServiceId !== undefined &&
+        this.externalServiceId !== null &&
+        this.serviceId !== undefined &&
+        this.serviceId !== null
+      ) {
+        this.downloadStatus = downloadTracker.getAlbumProgress(
+          this.serviceId,
+          this.externalServiceId
         );
       }
     }

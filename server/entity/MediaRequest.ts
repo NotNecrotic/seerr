@@ -1,3 +1,4 @@
+import MusicBrainz from '@server/api/musicbrainz';
 import TheMovieDb from '@server/api/themoviedb';
 import {
   MediaRequestStatus,
@@ -6,6 +7,7 @@ import {
 } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import type { MediaRequestBody } from '@server/interfaces/api/requestInterfaces';
+import type { QuotaResponse } from '@server/interfaces/api/userInterfaces';
 import notificationManager, { Notification } from '@server/lib/notifications';
 import overrideRules from '@server/lib/overrideRules';
 import { Permission } from '@server/lib/permissions';
@@ -33,6 +35,8 @@ import {
 } from 'typeorm';
 import Media from './Media';
 import SeasonRequest from './SeasonRequest';
+import Track from './Track';
+import TrackRequest from './TrackRequest';
 import { User } from './User';
 
 export class RequestPermissionError extends Error {}
@@ -43,6 +47,23 @@ export class BlocklistedMediaError extends Error {}
 
 type MediaRequestOptions = {
   isAutoRequest?: boolean;
+};
+
+/**
+ * Pick the quota bucket that applies to a media type.
+ *
+ * Music is counted per track rather than per request, but the limit itself behaves the
+ * same as the other two types.
+ */
+const getUserQuotaType = (mediaType: MediaType, quotas: QuotaResponse) => {
+  switch (mediaType) {
+    case MediaType.MOVIE:
+      return quotas.movie;
+    case MediaType.TV:
+      return quotas.tv;
+    case MediaType.MUSIC:
+      return quotas.music;
+  }
 };
 
 @Entity()
@@ -136,17 +157,28 @@ export class MediaRequest {
           requestBody.is4k ? '4K ' : ''
         }series requests.`
       );
+    } else if (
+      requestBody.mediaType === MediaType.MUSIC &&
+      !requestUser.hasPermission(
+        [Permission.REQUEST, Permission.REQUEST_MUSIC],
+        {
+          type: 'or',
+        }
+      )
+    ) {
+      throw new RequestPermissionError(
+        'You do not have permission to make music requests.'
+      );
     }
 
     const quotas = await requestUser.getQuota();
 
     const canBypassQuota = user.hasPermission(Permission.MANAGE_REQUESTS);
+    const quota = getUserQuotaType(requestBody.mediaType, quotas);
     const ignoreQuota =
       requestBody.ignoreQuota === true &&
       canBypassQuota &&
-      ((requestBody.mediaType === MediaType.MOVIE
-        ? quotas.movie.limit
-        : quotas.tv.limit) ?? 0) > 0;
+      (quota?.limit ?? 0) > 0;
 
     if (!ignoreQuota) {
       if (requestBody.ignoreQuota && !canBypassQuota) {
@@ -163,7 +195,26 @@ export class MediaRequest {
         quotas.tv.restricted
       ) {
         throw new QuotaRestrictedError('Series Quota exceeded.');
+      } else if (
+        requestBody.mediaType === MediaType.MUSIC &&
+        quotas.music.restricted
+      ) {
+        throw new QuotaRestrictedError('Music Quota exceeded.');
       }
+    }
+
+    if (requestBody.mediaType === MediaType.MUSIC) {
+      // Music is keyed on MusicBrainz rather than TMDB, and its request shape (tracks
+      // rather than seasons) differs enough that it is handled before the shared
+      // TMDB-based preamble rather than threaded through it.
+      return MediaRequest.createMusicRequest(
+        requestBody,
+        requestUser,
+        user,
+        options,
+        canBypassQuota,
+        ignoreQuota
+      );
     }
 
     const tmdbMedia =
@@ -491,6 +542,184 @@ export class MediaRequest {
     }
   }
 
+  /**
+   * Create a music request.
+   *
+   * A music `Media` row represents a release, and individual tracks within it are
+   * requested the same way TV seasons are: a subset of the release's tracks, each with
+   * its own approval state.
+   */
+  private static async createMusicRequest(
+    requestBody: MediaRequestBody,
+    requestUser: User,
+    user: User,
+    options: MediaRequestOptions,
+    canBypassQuota: boolean,
+    ignoreQuota: boolean
+  ): Promise<MediaRequest> {
+    const mediaRepository = getRepository(Media);
+    const requestRepository = getRepository(MediaRequest);
+    const musicbrainz = new MusicBrainz();
+
+    if (!requestBody.musicBrainzId) {
+      throw new Error('A MusicBrainz ID is required to request music.');
+    }
+
+    const release = await musicbrainz.getRelease({
+      releaseMbid: requestBody.musicBrainzId,
+    });
+
+    if (!release.tracks.length) {
+      throw new NoSeasonsAvailableError('This release has no tracks');
+    }
+
+    const quotas = await requestUser.getQuota();
+
+    let media = await mediaRepository.findOne({
+      where: {
+        musicBrainzId: release.id,
+        mediaType: MediaType.MUSIC,
+      },
+      relations: ['requests'],
+    });
+
+    if (!media) {
+      media = new Media({
+        musicBrainzId: release.id,
+        // Music has no TMDB id; tmdbId is left null for music rows.
+        status: MediaStatus.PENDING,
+        mediaType: MediaType.MUSIC,
+      });
+    } else {
+      if (media.status === MediaStatus.BLOCKLISTED) {
+        logger.warn('Request for media blocked due to being blocklisted', {
+          musicBrainzId: release.id,
+          mediaType: MediaType.MUSIC,
+          label: 'Media Request',
+        });
+
+        throw new BlocklistedMediaError('This media is blocklisted.');
+      }
+
+      if (
+        media.status === MediaStatus.UNKNOWN ||
+        media.status === MediaStatus.DELETED
+      ) {
+        media.status = MediaStatus.PENDING;
+      }
+    }
+
+    // Determine which tracks the user wants. 'all' means the whole release.
+    let requestedTracks: number[];
+
+    if (requestBody.tracks === undefined || requestBody.tracks === 'all') {
+      requestedTracks = release.tracks.map((track) => track.trackNumber);
+    } else {
+      requestedTracks = [...new Set(requestBody.tracks)].sort((a, b) => a - b);
+
+      // Guard against clients sending track numbers that do not exist on the release.
+      const available = new Set(
+        release.tracks.map((track) => track.trackNumber)
+      );
+      requestedTracks = requestedTracks.filter((track) => available.has(track));
+    }
+
+    // Exclude tracks that already have an outstanding request, mirroring how TV
+    // seasons are de-duplicated.
+    const existingRequests = await requestRepository.find({
+      where: { media: { id: media.id } },
+      relations: { tracks: true },
+    });
+
+    const requestedTrackNumbers = new Set<number>();
+    existingRequests.forEach((existing) => {
+      if (
+        existing.status === MediaRequestStatus.DECLINED ||
+        existing.status === MediaRequestStatus.COMPLETED
+      ) {
+        return;
+      }
+      existing.tracks?.forEach((track) =>
+        requestedTrackNumbers.add(track.trackNumber)
+      );
+    });
+
+    const finalTracks = requestedTracks.filter(
+      (track) => !requestedTrackNumbers.has(track)
+    );
+
+    if (finalTracks.length === 0) {
+      throw new NoSeasonsAvailableError('No tracks available to request');
+    } else if (
+      !ignoreQuota &&
+      quotas.music.limit &&
+      finalTracks.length > (quotas.music.remaining ?? 0)
+    ) {
+      throw new QuotaRestrictedError('Music Quota exceeded.');
+    }
+
+    // Seed the media's track list from the release so availability can be tracked
+    // per track as Lidarr reports files.
+    const existingTrackNumbers = new Set(
+      (media.tracks ?? []).map((track) => track.trackNumber)
+    );
+    const newTracks = release.tracks
+      .filter((track) => !existingTrackNumbers.has(track.trackNumber))
+      .map(
+        (track) =>
+          new Track({
+            trackNumber: track.trackNumber,
+            musicBrainzId: track.id,
+            status: MediaStatus.UNKNOWN,
+          })
+      );
+
+    if (newTracks.length) {
+      media.tracks = [...(media.tracks ?? []), ...newTracks];
+    }
+
+    await mediaRepository.save(media);
+
+    const canAutoApprove = user.hasPermission(
+      [
+        Permission.AUTO_APPROVE,
+        Permission.AUTO_APPROVE_MUSIC,
+        Permission.MANAGE_REQUESTS,
+      ],
+      { type: 'or' }
+    );
+
+    const request = new MediaRequest({
+      type: MediaType.MUSIC,
+      media,
+      requestedBy: requestUser,
+      status: canAutoApprove
+        ? MediaRequestStatus.APPROVED
+        : MediaRequestStatus.PENDING,
+      modifiedBy: canAutoApprove ? user : undefined,
+      // Music has no 4K variant.
+      is4k: false,
+      serverId: requestBody.serverId,
+      profileId: requestBody.profileId,
+      rootFolder: requestBody.rootFolder,
+      tags: requestBody.tags,
+      tracks: finalTracks.map(
+        (trackNumber) =>
+          new TrackRequest({
+            trackNumber,
+            status: canAutoApprove
+              ? MediaRequestStatus.APPROVED
+              : MediaRequestStatus.PENDING,
+          })
+      ),
+      isAutoRequest: options.isAutoRequest ?? false,
+      ignoreQuota,
+    });
+
+    await requestRepository.save(request);
+    return request;
+  }
+
   @PrimaryGeneratedColumn()
   public id: number;
 
@@ -535,11 +764,24 @@ export class MediaRequest {
   @RelationCount((request: MediaRequest) => request.seasons)
   public seasonCount: number;
 
+  @RelationCount((request: MediaRequest) => request.tracks)
+  public trackCount: number;
+
   @OneToMany(() => SeasonRequest, (season) => season.request, {
     eager: true,
     cascade: true,
   })
   public seasons: SeasonRequest[];
+
+  /**
+   * Requested tracks for music media. Mirrors `seasons`: each carries its own
+   * approval state so a subset of a release can be requested and approved.
+   */
+  @OneToMany(() => TrackRequest, (track) => track.request, {
+    eager: true,
+    cascade: true,
+  })
+  public tracks: TrackRequest[];
 
   @Column({ default: false })
   public is4k: boolean;
@@ -712,7 +954,12 @@ export class MediaRequest {
     const tmdb = new TheMovieDb();
 
     try {
-      const mediaType = entity.type === MediaType.MOVIE ? 'Movie' : 'Series';
+      const mediaType =
+        entity.type === MediaType.MOVIE
+          ? 'Movie'
+          : entity.type === MediaType.MUSIC
+            ? 'Album'
+            : 'Series';
       let event: string | undefined;
       let notifyAdmin = true;
       let notifySystem = true;
@@ -796,6 +1043,46 @@ export class MediaRequest {
             },
           ],
         });
+      } else if (entity.type === MediaType.MUSIC) {
+        // Music has no artwork on MusicBrainz, so cover art comes from the Cover Art
+        // Archive, which is a separate service and may not have a front cover.
+        const musicbrainz = new MusicBrainz();
+
+        if (media.musicBrainzId) {
+          const release = await musicbrainz.getRelease({
+            releaseMbid: media.musicBrainzId,
+          });
+
+          const subject = `${release.title}${
+            release.date ? ` (${release.date.slice(0, 4)})` : ''
+          }`;
+
+          notificationManager.sendNotification(type, {
+            media,
+            request: entity,
+            notifyAdmin,
+            notifySystem,
+            notifyUser: notifyAdmin ? undefined : entity.requestedBy,
+            event,
+            subject,
+            message: truncate(release.overview ?? '', {
+              length: 500,
+              separator: /\s/,
+              omission: '…',
+            }),
+            // Omitted rather than guessed: a missing CAA cover would 404 in the
+            // notification image, and some notification agents have no fallback.
+            image: release.coverArt,
+            extra: [
+              {
+                name: 'Requested Tracks',
+                value: entity.tracks
+                  .map((track) => track.trackNumber)
+                  .join(', '),
+              },
+            ],
+          });
+        }
       }
     } catch (e) {
       logger.error('Something went wrong sending media notification(s)', {

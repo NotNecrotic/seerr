@@ -9,7 +9,7 @@ export interface TmdbTitleCardProps {
   id: number;
   tmdbId: number;
   tvdbId?: number;
-  type: 'movie' | 'tv';
+  type: 'movie' | 'tv' | 'music';
   canExpand?: boolean;
   isAddedToWatchlist?: boolean;
   mutateParent?: () => void;

@@ -48,7 +48,7 @@ export interface QualityProfile {
   name: string;
 }
 
-interface QueueItem {
+export interface QueueItem {
   size: number;
   title: string;
   sizeleft: number;
@@ -77,6 +77,8 @@ interface QueueResponse<QueueItemAppendT> {
   totalRecords: number;
   records: (QueueItem & QueueItemAppendT)[];
 }
+
+export type ServarrQueueItem<QueueItemAppendT> = QueueItem & QueueItemAppendT;
 
 class ServarrBase<QueueItemAppendT> extends ExternalAPI {
   static buildUrl(settings: DVRSettings, path?: string): string {

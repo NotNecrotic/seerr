@@ -16,8 +16,15 @@ export interface RequestResultsResponse extends PaginatedResponse {
 export type MediaRequestBody = {
   mediaType: MediaType;
   mediaId: number;
+  /**
+   * MusicBrainz release ID. Music has no TMDB equivalent, so `mediaId` is not used and
+   * requests are keyed on this instead.
+   */
+  musicBrainzId?: string;
   tvdbId?: number;
   seasons?: number[] | 'all';
+  /** Track numbers to request within a music release. Mirrors `seasons`. */
+  tracks?: number[] | 'all';
   is4k?: boolean;
   serverId?: number;
   profileId?: number;

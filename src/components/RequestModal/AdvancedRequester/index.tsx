@@ -65,14 +65,18 @@ export type RequestOverrides = {
 };
 
 interface AdvancedRequesterProps {
-  type: 'movie' | 'tv';
+  type: 'movie' | 'tv' | 'lidarr';
   tmdbId?: number;
   is4k: boolean;
   isAnime?: boolean;
   defaultOverrides?: RequestOverrides;
   requestUser?: User;
   requestId?: number;
-  quota?: { movie: { limit?: number }; tv: { limit?: number } };
+  quota?: {
+    movie: { limit?: number };
+    tv: { limit?: number };
+    music: { limit?: number };
+  };
   onChange: (overrides: RequestOverrides) => void;
 }
 
@@ -90,8 +94,14 @@ const AdvancedRequester = ({
   const intl = useIntl();
   const { addToast } = useToasts();
   const { user: currentUser, hasPermission: currentHasPermission } = useUser();
+
+  // Lidarr has no 4K variant and no metadata profile, so its settings are simpler
+  // than Radarr's.
+  const serviceName =
+    type === 'movie' ? 'radarr' : type === 'lidarr' ? 'lidarr' : 'sonarr';
+
   const { data, error } = useSWR<ServiceCommonServer[]>(
-    `/api/v1/service/${type === 'movie' ? 'radarr' : 'sonarr'}`,
+    `/api/v1/service/${serviceName}`,
     {
       refreshInterval: 0,
       refreshWhenHidden: false,
@@ -124,14 +134,16 @@ const AdvancedRequester = ({
   );
   const isIgnoreQuotaVisible =
     currentHasPermission([Permission.MANAGE_REQUESTS]) &&
-    ((type === 'movie' ? quota?.movie.limit : quota?.tv.limit) ?? 0) > 0;
+    ((type === 'movie'
+      ? quota?.movie.limit
+      : type === 'lidarr'
+        ? quota?.music.limit
+        : quota?.tv.limit) ?? 0) > 0;
 
   const { data: serverData, isValidating } =
     useSWR<ServiceCommonServerWithDetails>(
       selectedServer !== null
-        ? `/api/v1/service/${
-            type === 'movie' ? 'radarr' : 'sonarr'
-          }/${selectedServer}`
+        ? `/api/v1/service/${serviceName}/${selectedServer}`
         : null,
       {
         refreshInterval: 0,
@@ -160,13 +172,18 @@ const AdvancedRequester = ({
                 Permission.REQUEST_4K,
                 type === 'movie'
                   ? Permission.REQUEST_4K_MOVIE
-                  : Permission.REQUEST_4K_TV,
+                  : type === 'lidarr'
+                    ? // Music has no 4K variant, so only the base permission applies
+                      Permission.REQUEST
+                    : Permission.REQUEST_4K_TV,
               ]
             : [
                 Permission.REQUEST,
                 type === 'movie'
                   ? Permission.REQUEST_MOVIE
-                  : Permission.REQUEST_TV,
+                  : type === 'lidarr'
+                    ? Permission.REQUEST_MUSIC
+                    : Permission.REQUEST_TV,
               ],
           user.permissions,
           { type: 'or' }

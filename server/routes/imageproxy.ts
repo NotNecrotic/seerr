@@ -30,6 +30,26 @@ function initTvdbImageProxy() {
   return _tvdbImageProxy;
 }
 
+// Cover Art Archive serves music artwork. It redirects to archive.org and rate-limits
+// anonymous clients far more aggressively than TMDB, so this tier is deliberately
+// slower and leans on the disk cache for repeat hits.
+let _musicbrainzImageProxy: ImageProxy;
+function initMusicbrainzImageProxy() {
+  if (!_musicbrainzImageProxy) {
+    _musicbrainzImageProxy = new ImageProxy(
+      'musicbrainz',
+      'https://coverartarchive.org',
+      {
+        rateLimitOptions: {
+          maxRequests: 5,
+          maxRPS: 5,
+        },
+      }
+    );
+  }
+  return _musicbrainzImageProxy;
+}
+
 router.get<{
   type: string;
   path: string[];
@@ -47,6 +67,8 @@ router.get<{
       imageData = await initTmdbImageProxy().getImage(imagePath);
     } else if (req.params.type === 'tvdb') {
       imageData = await initTvdbImageProxy().getImage(imagePath);
+    } else if (req.params.type === 'musicbrainz') {
+      imageData = await initMusicbrainzImageProxy().getImage(imagePath);
     } else {
       logger.error('Unsupported image type', {
         imagePath,

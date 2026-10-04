@@ -5,12 +5,14 @@ export type AvailableCacheIds =
   | 'tmdbscan'
   | 'radarr'
   | 'sonarr'
+  | 'lidarr'
   | 'rt'
   | 'imdb'
   | 'github'
   | 'plextv'
   | 'plexwatchlist'
-  | 'tvdb';
+  | 'tvdb'
+  | 'musicbrainz';
 
 const DEFAULT_TTL = 300;
 
@@ -28,6 +30,7 @@ const TMDB_SCAN_MAX_KEYS = 2000;
 // these tiers, and keys are prefixed by server url, so this is a few keys per server.
 const RADARR_MAX_KEYS = 64;
 const SONARR_MAX_KEYS = 64;
+const LIDARR_MAX_KEYS = 64;
 
 // One key per searched title, each holding twenty search hits.
 const RT_MAX_KEYS = 500;
@@ -47,6 +50,11 @@ const PLEX_WATCHLIST_MAX_KEYS = 500;
 // Several keys per show, holding the largest payloads of any tier as the extended
 // series lookup carries every episode.
 const TVDB_MAX_KEYS = 500;
+
+// One key per searched term, release or artist, each holding a page of results.
+// MusicBrainz is the most aggressively rate-limited upstream (roughly 1 req/sec for
+// anonymous clients), so this tier carries the longest TTL of the API caches.
+const MUSICBRAINZ_MAX_KEYS = 1000;
 
 export interface CacheStats {
   hits: number;
@@ -227,6 +235,7 @@ class CacheManager {
     }),
     radarr: new Cache('radarr', 'Radarr API', { max: RADARR_MAX_KEYS }),
     sonarr: new Cache('sonarr', 'Sonarr API', { max: SONARR_MAX_KEYS }),
+    lidarr: new Cache('lidarr', 'Lidarr API', { max: LIDARR_MAX_KEYS }),
     rt: new Cache('rt', 'Rotten Tomatoes API', {
       stdTtl: 43200,
       max: RT_MAX_KEYS,
@@ -249,6 +258,10 @@ class CacheManager {
     tvdb: new Cache('tvdb', 'The TVDB API', {
       stdTtl: 21600,
       max: TVDB_MAX_KEYS,
+    }),
+    musicbrainz: new Cache('musicbrainz', 'The MusicBrainz API', {
+      stdTtl: 21600,
+      max: MUSICBRAINZ_MAX_KEYS,
     }),
   };
 

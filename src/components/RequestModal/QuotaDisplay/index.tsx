@@ -30,7 +30,7 @@ const messages = defineMessages('components.RequestModal.QuotaDisplay', {
 
 interface QuotaDisplayProps {
   quota?: QuotaStatus;
-  mediaType: 'movie' | 'tv';
+  mediaType: 'movie' | 'tv' | 'music';
   userOverride?: number | null;
   remaining?: number;
   overLimit?: number;

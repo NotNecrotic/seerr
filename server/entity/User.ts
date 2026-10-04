@@ -28,6 +28,7 @@ import {
 import Issue from './Issue';
 import { MediaRequest } from './MediaRequest';
 import SeasonRequest from './SeasonRequest';
+import TrackRequest from './TrackRequest';
 import { UserPushSubscription } from './UserPushSubscription';
 import { UserSettings } from './UserSettings';
 
@@ -103,7 +104,18 @@ export class User {
   @Column({ type: 'varchar', nullable: true, select: false })
   public plexToken?: string | null;
 
-  @Column({ type: 'integer', default: 0 })
+  @Column({
+    type: resolveDbType('bigint'),
+    default: 0,
+    // Postgres returns bigint columns as strings to avoid precision loss, which would
+    // break the bitwise comparisons in hasPermission. Values here are far inside the
+    // safe-integer range, so converting is safe.
+    transformer: {
+      from: (value: string | number | null): number =>
+        value === null ? 0 : Number(value),
+      to: (value: number): number => value,
+    },
+  })
   public permissions = 0;
 
   @Column()
@@ -135,6 +147,12 @@ export class User {
 
   @Column({ nullable: true })
   public tvQuotaDays?: number;
+
+  @Column({ nullable: true })
+  public musicQuotaLimit?: number;
+
+  @Column({ nullable: true })
+  public musicQuotaDays?: number;
 
   @OneToOne(() => UserSettings, (settings) => settings.user, {
     cascade: true,
@@ -363,6 +381,54 @@ export class User {
         ).reduce((sum: number, req: MediaRequest) => sum + req.seasonCount, 0)
       : 0;
 
+    const musicQuotaLimit = !canBypass
+      ? (this.musicQuotaLimit ?? defaultQuotas.music.quotaLimit)
+      : 0;
+    const musicQuotaDays = this.musicQuotaDays ?? defaultQuotas.music.quotaDays;
+
+    // Count music track requests made during quota period. Mirrors the TV logic, which
+    // counts seasons rather than series, since one request can cover many tracks.
+    const musicDate = new Date();
+    if (musicQuotaDays) {
+      musicDate.setDate(musicDate.getDate() - musicQuotaDays);
+    }
+    const musicQuotaStartDate = musicDate.toJSON();
+    const musicQuotaUsedQuery = requestRepository
+      .createQueryBuilder('request')
+      .leftJoin('request.requestedBy', 'requestedBy')
+      .where('request.type = :requestType', {
+        requestType: MediaType.MUSIC,
+      })
+      .andWhere('requestedBy.id = :userId', {
+        userId: this.id,
+      })
+      .andWhere('request.status != :declinedStatus', {
+        declinedStatus: MediaRequestStatus.DECLINED,
+      });
+
+    if (musicQuotaDays) {
+      musicQuotaUsedQuery.andWhere('request.createdAt > :date', {
+        date: musicQuotaStartDate,
+      });
+    }
+
+    const musicQuotaUsed = musicQuotaLimit
+      ? (
+          await musicQuotaUsedQuery
+            .andWhere('request.ignoreQuota = :ignoreQuota', {
+              ignoreQuota: false,
+            })
+            .addSelect((subQuery) => {
+              return subQuery
+                .select('COUNT(track.id)', 'trackCount')
+                .from(TrackRequest, 'track')
+                .leftJoin('track.request', 'parentRequest')
+                .where('parentRequest.id = request.id');
+            }, 'trackCount')
+            .getMany()
+        ).reduce((sum: number, req: MediaRequest) => sum + req.trackCount, 0)
+      : 0;
+
     return {
       movie: {
         days: movieQuotaDays,
@@ -383,6 +449,17 @@ export class User {
           ? Math.max(0, tvQuotaLimit - tvQuotaUsed)
           : undefined,
         restricted: !!(tvQuotaLimit && tvQuotaLimit - tvQuotaUsed <= 0),
+      },
+      music: {
+        days: musicQuotaDays,
+        limit: musicQuotaLimit,
+        used: musicQuotaUsed,
+        remaining: musicQuotaLimit
+          ? Math.max(0, musicQuotaLimit - musicQuotaUsed)
+          : undefined,
+        restricted: !!(
+          musicQuotaLimit && musicQuotaLimit - musicQuotaUsed <= 0
+        ),
       },
     };
   }

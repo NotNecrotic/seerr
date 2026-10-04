@@ -18,7 +18,7 @@ export interface Library {
   id: string;
   name: string;
   enabled: boolean;
-  type: 'show' | 'movie';
+  type: 'show' | 'movie' | 'music';
   lastScan?: number;
 }
 
@@ -103,6 +103,14 @@ export interface SonarrSettings extends DVRSettings {
   monitorNewItems: 'all' | 'none';
 }
 
+/**
+ * Lidarr has no metadata profile (that concept was dropped from Lidarr v2 onwards), so
+ * unlike Radarr these settings carry only the single quality profile inherited from
+ * `DVRSettings`. Typed as an alias because an empty interface would be equivalent to
+ * its supertype.
+ */
+export type LidarrSettings = DVRSettings;
+
 interface Quota {
   quotaLimit?: number;
   quotaDays?: number;
@@ -138,6 +146,7 @@ export interface MainSettings {
   defaultQuotas: {
     movie: Quota;
     tv: Quota;
+    music: Quota;
   };
   hideAvailable: boolean;
   hideBlocklisted: boolean;
@@ -366,6 +375,7 @@ export type JobId =
   | 'plex-refresh-token'
   | 'radarr-scan'
   | 'sonarr-scan'
+  | 'lidarr-scan'
   | 'download-sync'
   | 'download-sync-reset'
   | 'jellyfin-recently-added-scan'
@@ -385,6 +395,7 @@ export interface AllSettings {
   tautulli: TautulliSettings;
   radarr: RadarrSettings[];
   sonarr: SonarrSettings[];
+  lidarr: LidarrSettings[];
   public: PublicSettings;
   notifications: NotificationSettings;
   jobs: Record<JobId, JobSettings>;
@@ -416,6 +427,7 @@ class Settings {
         defaultQuotas: {
           movie: {},
           tv: {},
+          music: {},
         },
         hideAvailable: false,
         hideBlocklisted: false,
@@ -463,6 +475,7 @@ class Settings {
       },
       radarr: [],
       sonarr: [],
+      lidarr: [],
       public: {
         initialized: false,
       },
@@ -593,6 +606,9 @@ class Settings {
         'sonarr-scan': {
           schedule: '0 30 4 * * *',
         },
+        'lidarr-scan': {
+          schedule: '0 0 5 * * *',
+        },
         'availability-sync': {
           schedule: '0 0 5 * * *',
         },
@@ -700,6 +716,14 @@ class Settings {
 
   set sonarr(data: SonarrSettings[]) {
     this.data.sonarr = data;
+  }
+
+  get lidarr(): LidarrSettings[] {
+    return this.data.lidarr;
+  }
+
+  set lidarr(data: LidarrSettings[]) {
+    this.data.lidarr = data;
   }
 
   get public(): PublicSettings {

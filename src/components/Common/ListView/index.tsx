@@ -6,6 +6,7 @@ import useVerticalScroll from '@app/hooks/useVerticalScroll';
 import globalMessages from '@app/i18n/globalMessages';
 import { MediaStatus } from '@server/constants/media';
 import type { WatchlistItem } from '@server/interfaces/api/discoverInterfaces';
+import type { MusicSearchResult } from '@server/models/Music';
 import type {
   CollectionResult,
   MovieResult,
@@ -14,18 +15,24 @@ import type {
 } from '@server/models/Search';
 import { useIntl } from 'react-intl';
 
-type ListViewProps = {
+interface ListViewProps {
   items?: (TvResult | MovieResult | PersonResult | CollectionResult)[];
+  /**
+   * Music results are rendered by their own card because MusicBrainz releases have a
+   * different shape (artist name, no TMDB id) and square cover art.
+   */
+  musicItems?: MusicSearchResult[];
   plexItems?: WatchlistItem[];
   isEmpty?: boolean;
   isLoading?: boolean;
   isReachingEnd?: boolean;
-  onScrollBottom: () => void;
+  onScrollBottom?: () => void;
   mutateParent?: () => void;
-};
+}
 
 const ListView = ({
   items,
+  musicItems,
   isEmpty,
   isLoading,
   onScrollBottom,
@@ -35,7 +42,10 @@ const ListView = ({
 }: ListViewProps) => {
   const intl = useIntl();
   const { hasPermission } = useUser();
-  useVerticalScroll(onScrollBottom, !isLoading && !isEmpty && !isReachingEnd);
+  useVerticalScroll(
+    onScrollBottom ?? (() => undefined),
+    !isLoading && !isEmpty && !isReachingEnd
+  );
 
   const blocklistVisibility = hasPermission(
     [Permission.MANAGE_BLOCKLIST, Permission.VIEW_BLOCKLIST],
@@ -147,6 +157,30 @@ const ListView = ({
 
             return <li key={`${title.id}-${index}`}>{titleCard}</li>;
           })}
+        {musicItems
+          ?.filter((title) =>
+            blocklistVisibility
+              ? true
+              : title.mediaInfo?.status !== MediaStatus.BLOCKLISTED
+          )
+          .map((title, index) => (
+            <li key={`music-${title.id}-${index}`}>
+              <TitleCard
+                // MusicBrainz ids are UUIDs, so this is a string rather than the
+                // integer ids the other media types use.
+                id={Number.NaN}
+                musicId={title.id}
+                image={title.posterPath}
+                status={title.mediaInfo?.status}
+                summary={title.artistName}
+                title={title.title}
+                year={title.date}
+                mediaType="music"
+                inProgress={(title.mediaInfo?.downloadStatus ?? []).length > 0}
+                canExpand
+              />
+            </li>
+          ))}
         {isLoading &&
           !isReachingEnd &&
           [...Array(20)].map((_item, i) => (

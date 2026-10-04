@@ -1,8 +1,12 @@
+import MusicBrainz from '@server/api/musicbrainz';
 import TheMovieDb from '@server/api/themoviedb';
 import type { TmdbSearchMultiResponse } from '@server/api/themoviedb/interfaces';
+import { MediaType } from '@server/constants/media';
+import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { findSearchProvider } from '@server/lib/search';
 import logger from '@server/logger';
+import { mapReleaseSearchResult } from '@server/models/Music';
 import { mapSearchResults } from '@server/models/Search';
 import { Router } from 'express';
 
@@ -56,6 +60,87 @@ searchRoutes.get('/', async (req, res, next) => {
     return next({
       status: 500,
       message: 'Unable to retrieve search results.',
+    });
+  }
+});
+
+// Artists are music metadata rather than video metadata, so they get their own
+// endpoint rather than being mixed into the multi-search envelope above.
+searchRoutes.get('/artist', async (req, res, next) => {
+  const musicbrainz = new MusicBrainz();
+
+  try {
+    const artists = await musicbrainz.searchArtists({
+      query: req.query.query as string,
+      limit: 20,
+      offset: Number(req.query.page ?? 0) * 20,
+    });
+
+    return res.status(200).json({
+      page: Number(req.query.page ?? 0) + 1,
+      totalPages: 1,
+      totalResults: artists.length,
+      results: artists,
+    });
+  } catch (e) {
+    logger.debug('Something went wrong retrieving artist search results', {
+      label: 'API',
+      errorMessage: e.message,
+      query: req.query.query,
+    });
+    return next({
+      status: 500,
+      message: 'Unable to retrieve artist search results.',
+    });
+  }
+});
+
+// Music releases are searched through MusicBrainz rather than TMDB, and live on their
+// own endpoint because the two APIs have incompatible result shapes.
+searchRoutes.get('/music', async (req, res, next) => {
+  const musicbrainz = new MusicBrainz();
+
+  try {
+    const releases = await musicbrainz.searchReleases({
+      query: req.query.query as string,
+      limit: 20,
+      offset: Number(req.query.page ?? 0) * 20,
+    });
+
+    if (releases.length === 0) {
+      return res.status(200).json({
+        page: 1,
+        totalPages: 0,
+        totalResults: 0,
+        results: [],
+      });
+    }
+
+    // Attach Seerr-side request/availability state. Music rows are keyed on
+    // musicBrainzId rather than tmdbId, so this cannot use getRelatedMedia.
+    const mediaRepository = getRepository(Media);
+    const media = await mediaRepository.find({
+      where: { mediaType: MediaType.MUSIC },
+    });
+    const mediaByReleaseId = new Map(media.map((m) => [m.musicBrainzId, m]));
+
+    return res.status(200).json({
+      page: Number(req.query.page ?? 0) + 1,
+      totalPages: 1,
+      totalResults: releases.length,
+      results: releases.map((release) =>
+        mapReleaseSearchResult(release, mediaByReleaseId.get(release.id))
+      ),
+    });
+  } catch (e) {
+    logger.debug('Something went wrong retrieving music search results', {
+      label: 'API',
+      errorMessage: e.message,
+      query: req.query.query,
+    });
+    return next({
+      status: 500,
+      message: 'Unable to retrieve music search results.',
     });
   }
 });

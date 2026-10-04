@@ -25,7 +25,7 @@ export interface PlexLibraryItem {
   Guid?: {
     id: string;
   }[];
-  type: 'movie' | 'show' | 'season' | 'episode';
+  type: 'movie' | 'show' | 'season' | 'episode' | 'artist' | 'album' | 'track';
   Media: Media[];
 }
 
@@ -37,7 +37,8 @@ interface PlexLibraryResponse {
 }
 
 export interface PlexLibrary {
-  type: 'show' | 'movie';
+  // Plex reports music libraries as 'artist'.
+  type: 'show' | 'movie' | 'artist' | 'album';
   key: string;
   title: string;
   agent: string;
@@ -93,6 +94,31 @@ interface PlexMetadataResponse {
   };
 }
 
+/**
+ * Normalise Plex's section type into Seerr's library type.
+ *
+ * Plex uses separate 'artist' and 'album' section types; Seerr models both as music
+ * because album-level availability is what a music request tracks.
+ */
+const toSeerrLibraryType = (type: PlexLibrary['type']): Library['type'] =>
+  type === 'artist' || type === 'album' ? 'music' : type;
+
+/**
+ * Map a Plex library section type onto the metadata filter Seerr uses for it.
+ *
+ * Plex reports music libraries as 'artist' (album-level view) or 'album', while Seerr
+ * models music libraries as 'music'.
+ */
+const PLEX_LIBRARY_TYPE_FILTER: Record<
+  Library['type'],
+  { type: string; includeGuids: boolean }
+> = {
+  show: { type: '4', includeGuids: false },
+  movie: { type: '1', includeGuids: true },
+  // 8 is Plex's album filter; guids are what music matching reads.
+  music: { type: '8', includeGuids: true },
+};
+
 class PlexAPI extends ExternalAPI {
   constructor({
     plexToken,
@@ -142,9 +168,14 @@ class PlexAPI extends ExternalAPI {
       const libraries = await this.getLibraries();
 
       const newLibraries: Library[] = libraries
-        // Remove libraries that are not movie or show
+        // Remove libraries that are not movie, show, or music. Plex reports music
+        // libraries as 'artist' or 'album'; both are scanned at the album level.
         .filter(
-          (library) => library.type === 'movie' || library.type === 'show'
+          (library) =>
+            library.type === 'movie' ||
+            library.type === 'show' ||
+            library.type === 'artist' ||
+            library.type === 'album'
         )
         // Remove libraries that do not have a metadata agent set (usually personal video libraries)
         .filter((library) => library.agent !== 'com.plexapp.agents.none')
@@ -157,7 +188,7 @@ class PlexAPI extends ExternalAPI {
             id: library.key,
             name: library.title,
             enabled: existing?.enabled ?? false,
-            type: library.type,
+            type: toSeerrLibraryType(library.type),
             lastScan: existing?.lastScan,
           };
         });
@@ -181,10 +212,17 @@ class PlexAPI extends ExternalAPI {
 
   public async getLibraryContents(
     id: string,
-    { offset = 0, size = 50 }: { offset?: number; size?: number } = {}
+    {
+      offset = 0,
+      size = 50,
+      mediaType = 'movie',
+    }: { offset?: number; size?: number; mediaType?: Library['type'] } = {}
   ): Promise<{ totalSize: number; items: PlexLibraryItem[] }> {
+    const filter = PLEX_LIBRARY_TYPE_FILTER[mediaType];
     const response = await this.get<PlexLibraryResponse>(
-      `/library/sections/${id}/all?includeGuids=1`,
+      `/library/sections/${id}/all?type=${filter.type}${
+        filter.includeGuids ? '&includeGuids=1' : ''
+      }`,
       {
         headers: {
           'X-Plex-Container-Start': `${offset}`,
@@ -225,12 +263,12 @@ class PlexAPI extends ExternalAPI {
     options: { addedAt: number } = {
       addedAt: Date.now() - 1000 * 60 * 60,
     },
-    mediaType: 'movie' | 'show'
+    mediaType: Library['type'] = 'movie'
   ): Promise<PlexLibraryItem[]> {
+    const filter = PLEX_LIBRARY_TYPE_FILTER[mediaType];
     const response = await this.get<PlexLibraryResponse>(
-      `/library/sections/${id}/all?type=${mediaType === 'show' ? '4' : '1'}${
-        // Shows are queried as episodes, whose guids the scanner never reads.
-        mediaType === 'movie' ? '&includeGuids=1' : ''
+      `/library/sections/${id}/all?type=${filter.type}${
+        filter.includeGuids ? '&includeGuids=1' : ''
       }&sort=addedAt%3Adesc&addedAt>>=${Math.floor(options.addedAt / 1000)}`,
       {
         headers: {

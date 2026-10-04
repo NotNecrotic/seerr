@@ -177,6 +177,7 @@ class PlexScanner
     const response = await this.plexClient.getLibraryContents(library.id, {
       size: this.protectedBundleSize,
       offset: start,
+      mediaType: library.type,
     });
 
     this.progress = start;

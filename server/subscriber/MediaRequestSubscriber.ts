@@ -1,3 +1,6 @@
+import MusicBrainz from '@server/api/musicbrainz';
+import type { AddAlbumOptions } from '@server/api/servarr/lidarr';
+import LidarrAPI from '@server/api/servarr/lidarr';
 import type { RadarrMovieOptions } from '@server/api/servarr/radarr';
 import RadarrAPI from '@server/api/servarr/radarr';
 import type {
@@ -462,6 +465,288 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
 
           logger.warn(
             'Failed to send movie request to Radarr due to connection or configuration error, marking status as FAILED',
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+              errorMessage: e.message,
+            }
+          );
+
+          MediaRequest.sendNotification(
+            entity,
+            media,
+            Notification.MEDIA_FAILED
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Send an approved music request to Lidarr.
+   *
+   * Music differs from movies and TV in one important way: Lidarr manages whole albums,
+   * so a track-level request adds the containing album and the individual tracks are
+   * tracked against its files.
+   */
+  public async sendToLidarr(
+    entity: MediaRequest,
+    manager: EntityManager
+  ): Promise<void> {
+    if (
+      entity.status === MediaRequestStatus.APPROVED &&
+      entity.type === MediaType.MUSIC
+    ) {
+      try {
+        const mediaRepository = manager.getRepository(Media);
+        const settings = getSettings();
+
+        if (settings.lidarr.length === 0) {
+          logger.info(
+            'No Lidarr server configured, skipping request processing',
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+          return;
+        }
+
+        let lidarrSettings = settings.lidarr.find((lidarr) => lidarr.isDefault);
+
+        if (
+          entity.serverId !== null &&
+          entity.serverId >= 0 &&
+          lidarrSettings?.id !== entity.serverId
+        ) {
+          lidarrSettings = settings.lidarr.find(
+            (lidarr) => lidarr.id === entity.serverId
+          );
+          logger.info(
+            `Request has an override server: ${lidarrSettings?.name}`,
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+        }
+
+        if (!lidarrSettings) {
+          logger.warn(
+            'There is no default Lidarr server configured. Did you set any of your Lidarr servers as default?',
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+          return;
+        }
+
+        let rootFolder = lidarrSettings.activeDirectory;
+        let qualityProfile = lidarrSettings.activeProfileId;
+        let tags = lidarrSettings.tags ? [...lidarrSettings.tags] : [];
+
+        if (
+          entity.rootFolder &&
+          entity.rootFolder !== '' &&
+          entity.rootFolder !== lidarrSettings.activeDirectory
+        ) {
+          rootFolder = entity.rootFolder;
+          logger.info(`Request has an override root folder: ${rootFolder}`, {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+          });
+        }
+
+        if (
+          entity.profileId &&
+          entity.profileId !== lidarrSettings.activeProfileId
+        ) {
+          qualityProfile = entity.profileId;
+          logger.info(
+            `Request has an override quality profile ID: ${qualityProfile}`,
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+        }
+
+        if (entity.tags && !isEqual(entity.tags, lidarrSettings.tags)) {
+          tags = entity.tags;
+          logger.info(`Request has override tags`, {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+            tagIds: tags,
+          });
+        }
+
+        const media = await mediaRepository.findOne({
+          where: { id: entity.media.id },
+        });
+
+        if (!media) {
+          logger.error('Media data not found', {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+          });
+          return;
+        }
+
+        if (!media.musicBrainzId) {
+          logger.error('Music media is missing its MusicBrainz ID', {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+          });
+          return;
+        }
+
+        if (media.status === MediaStatus.AVAILABLE) {
+          logger.warn('Media already exists, marking request as COMPLETED', {
+            label: 'Media Request',
+            requestId: entity.id,
+            mediaId: entity.media.id,
+          });
+          entity.status = MediaRequestStatus.COMPLETED;
+          await manager.getRepository(MediaRequest).save(entity);
+          return;
+        }
+
+        const musicbrainz = new MusicBrainz();
+        const release = await musicbrainz.getRelease({
+          releaseMbid: media.musicBrainzId,
+        });
+
+        // Lidarr keys albums on the MusicBrainz release-group ID, not the release ID
+        // that Media stores.
+        if (!release.releaseGroupId) {
+          logger.warn(
+            'Release has no release-group ID, which Lidarr requires. Marking request as FAILED',
+            {
+              label: 'Media Request',
+              requestId: entity.id,
+              mediaId: entity.media.id,
+            }
+          );
+          entity.status = MediaRequestStatus.FAILED;
+          await manager.getRepository(MediaRequest).save(entity);
+          MediaRequest.sendNotification(
+            entity,
+            media,
+            Notification.MEDIA_FAILED
+          );
+          return;
+        }
+
+        media.status = MediaStatus.PENDING;
+        await mediaRepository.save(media);
+
+        // Lidarr has no 4K variant, so the album options are always the standard ones.
+        const lidarrAlbumOptions: AddAlbumOptions = {
+          title: release.title,
+          qualityProfileId: qualityProfile,
+          rootFolderPath: rootFolder,
+          foreignAlbumId: release.releaseGroupId,
+          artistForeignId: release.artistId,
+          monitored: true,
+          anyReleaseOk: true,
+          tags,
+          searchNow: true,
+        };
+
+        const lidarr = new LidarrAPI({
+          apiKey: lidarrSettings.apiKey,
+          url: LidarrAPI.buildUrl(lidarrSettings, '/api/v1'),
+        });
+
+        // Run entity asynchronously so we don't wait for it on the UI side
+        lidarr
+          .addAlbum(lidarrAlbumOptions)
+          .then(async (lidarrAlbum) => {
+            // Needs its own repository as this runs detached from the request transaction
+            const detachedMediaRepository = getRepository(Media);
+            // We grab media again here to make sure we have the latest version of it
+            const updatedMedia = await detachedMediaRepository.findOne({
+              where: { id: entity.media.id },
+            });
+
+            if (!updatedMedia) {
+              throw new Error('Media data not found');
+            }
+
+            updatedMedia.externalServiceId = lidarrAlbum.id;
+            updatedMedia.externalServiceSlug = lidarrAlbum.titleSlug;
+            updatedMedia.serviceId = lidarrSettings?.id;
+            await detachedMediaRepository.save(updatedMedia);
+          })
+          .catch(async () => {
+            try {
+              const requestRepository = getRepository(MediaRequest);
+
+              if (entity.status !== MediaRequestStatus.FAILED) {
+                entity.status = MediaRequestStatus.FAILED;
+                await requestRepository.save(entity);
+              }
+            } catch (saveError) {
+              logger.error('Failed to mark request as FAILED', {
+                label: 'Media Request',
+                requestId: entity.id,
+                errorMessage:
+                  saveError instanceof Error
+                    ? saveError.message
+                    : String(saveError),
+              });
+            }
+
+            logger.warn(
+              'Something went wrong sending music request to Lidarr, marking status as FAILED',
+              {
+                label: 'Media Request',
+                requestId: entity.id,
+                mediaId: entity.media.id,
+                lidarrAlbumOptions,
+              }
+            );
+
+            MediaRequest.sendNotification(
+              entity,
+              media,
+              Notification.MEDIA_FAILED
+            );
+          })
+          .finally(() => {
+            lidarr.clearCache({
+              foreignAlbumId: release.releaseGroupId,
+              externalId: entity.media.externalServiceId,
+            });
+          });
+        logger.info('Sent request to Lidarr', {
+          label: 'Media Request',
+          requestId: entity.id,
+          mediaId: entity.media.id,
+        });
+      } catch (e) {
+        const requestRepository = manager.getRepository(MediaRequest);
+        const mediaRepository = manager.getRepository(Media);
+        const media = await mediaRepository.findOne({
+          where: { id: entity.media.id },
+        });
+
+        if (media) {
+          entity.status = MediaRequestStatus.FAILED;
+          await requestRepository.save(entity);
+
+          logger.warn(
+            'Failed to send music request to Lidarr due to connection or configuration error, marking status as FAILED',
             {
               label: 'Media Request',
               requestId: entity.id,
@@ -1060,6 +1345,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     try {
       await this.sendToRadarr(event.entity as MediaRequest, event.manager);
       await this.sendToSonarr(event.entity as MediaRequest, event.manager);
+      await this.sendToLidarr(event.entity as MediaRequest, event.manager);
     } catch (e) {
       logger.error('Error while sending to *arr in afterUpdate subscriber', {
         label: 'Media Request',
@@ -1101,6 +1387,7 @@ export class MediaRequestSubscriber implements EntitySubscriberInterface<MediaRe
     try {
       await this.sendToRadarr(event.entity as MediaRequest, event.manager);
       await this.sendToSonarr(event.entity as MediaRequest, event.manager);
+      await this.sendToLidarr(event.entity as MediaRequest, event.manager);
     } catch (e) {
       logger.error('Error while sending to *arr in afterInsert subscriber', {
         label: 'Media Request',

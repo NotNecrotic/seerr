@@ -6,7 +6,7 @@ const imageLoader: ImageLoader = ({ src }) => src;
 
 export type CachedImageProps = ImageProps & {
   src: string;
-  type: 'tmdb' | 'avatar' | 'tvdb';
+  type: 'tmdb' | 'avatar' | 'tvdb' | 'musicbrainz';
 };
 
 /**
@@ -30,6 +30,15 @@ const CachedImage = ({ src, type, ...props }: CachedImageProps) => {
         ? src.replace(
             /^https:\/\/artworks\.thetvdb\.com\//,
             '/imageproxy/tvdb/'
+          )
+        : src;
+  } else if (type === 'musicbrainz') {
+    // Cover Art Archive, which serves album and artist art for MusicBrainz
+    imageUrl =
+      currentSettings.cacheImages && !src.startsWith('/')
+        ? src.replace(
+            /^https:\/\/coverartarchive\.org\//,
+            '/imageproxy/musicbrainz/'
           )
         : src;
   } else if (type === 'avatar') {
