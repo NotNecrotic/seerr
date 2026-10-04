@@ -58,6 +58,7 @@ const messages = defineMessages(
     streamingRegionTip: 'Show streaming sites by regional availability',
     movierequestlimit: 'Movie Request Limit',
     seriesrequestlimit: 'Series Request Limit',
+    musicrequestlimit: 'Music Request Limit',
     enableOverride: 'Override Global Limit',
     applanguage: 'Display Language',
     languageDefault: 'Default ({language})',
@@ -78,6 +79,7 @@ const UserGeneralSettings = () => {
   const { locale, setLocale } = useLocale();
   const [movieQuotaEnabled, setMovieQuotaEnabled] = useState(false);
   const [tvQuotaEnabled, setTvQuotaEnabled] = useState(false);
+  const [musicQuotaEnabled, setMusicQuotaEnabled] = useState(false);
   const router = useRouter();
   const {
     user,
@@ -124,6 +126,9 @@ const UserGeneralSettings = () => {
     setTvQuotaEnabled(
       data?.tvQuotaLimit != undefined && data?.tvQuotaDays != undefined
     );
+    setMusicQuotaEnabled(
+      data?.musicQuotaLimit != undefined && data?.musicQuotaDays != undefined
+    );
   }, [data]);
 
   if (!data && !error) {
@@ -159,6 +164,8 @@ const UserGeneralSettings = () => {
           movieQuotaDays: data?.movieQuotaDays,
           tvQuotaLimit: data?.tvQuotaLimit,
           tvQuotaDays: data?.tvQuotaDays,
+          musicQuotaLimit: data?.musicQuotaLimit,
+          musicQuotaDays: data?.musicQuotaDays,
           watchlistSyncMovies: data?.watchlistSyncMovies,
           watchlistSyncTv: data?.watchlistSyncTv,
         }}
@@ -180,6 +187,10 @@ const UserGeneralSettings = () => {
               movieQuotaDays: movieQuotaEnabled ? values.movieQuotaDays : null,
               tvQuotaLimit: tvQuotaEnabled ? values.tvQuotaLimit : null,
               tvQuotaDays: tvQuotaEnabled ? values.tvQuotaDays : null,
+              musicQuotaLimit: musicQuotaEnabled
+                ? values.musicQuotaLimit
+                : null,
+              musicQuotaDays: musicQuotaEnabled ? values.musicQuotaDays : null,
               watchlistSyncMovies: values.watchlistSyncMovies,
               watchlistSyncTv: values.watchlistSyncTv,
             });
@@ -495,6 +506,46 @@ const UserGeneralSettings = () => {
                             limitOverride={
                               !tvQuotaEnabled
                                 ? data?.globalTvQuotaLimit
+                                : undefined
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <label htmlFor="musicQuotaLimit" className="text-label">
+                        <span>
+                          {intl.formatMessage(messages.musicrequestlimit)}
+                        </span>
+                      </label>
+                      <div className="form-input-area">
+                        <div className="flex flex-col">
+                          <div className="mb-4 flex items-center">
+                            <input
+                              type="checkbox"
+                              checked={musicQuotaEnabled}
+                              onChange={() => setMusicQuotaEnabled((s) => !s)}
+                            />
+                            <span className="ml-2 text-gray-300">
+                              {intl.formatMessage(messages.enableOverride)}
+                            </span>
+                          </div>
+                          <QuotaSelector
+                            isDisabled={!musicQuotaEnabled}
+                            dayFieldName="musicQuotaDays"
+                            limitFieldName="musicQuotaLimit"
+                            mediaType="music"
+                            onChange={setFieldValue}
+                            defaultDays={values.musicQuotaDays}
+                            defaultLimit={values.musicQuotaLimit}
+                            dayOverride={
+                              !musicQuotaEnabled
+                                ? data?.globalMusicQuotaDays
+                                : undefined
+                            }
+                            limitOverride={
+                              !musicQuotaEnabled
+                                ? data?.globalMusicQuotaLimit
                                 : undefined
                             }
                           />

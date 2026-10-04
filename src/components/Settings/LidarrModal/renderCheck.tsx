@@ -13,48 +13,59 @@
  *
  *   npx tsx src/components/Settings/LidarrModal/renderCheck.tsx
  */
-import { JSDOM } from 'jsdom';
 import React from 'react';
 
-// jsdom globals must exist before react-dom is imported.
-const dom = new JSDOM(
-  '<!doctype html><html><body><div id="root"></div></body></html>',
-  {
-    url: 'http://localhost/',
-    pretendToBeVisual: true,
-  }
-);
-
-// `navigator` is a getter-only property on modern Node, so assign via defineProperty.
-const define = (key: string, value: unknown) => {
-  Object.defineProperty(globalThis, key, {
-    value,
-    configurable: true,
-    writable: true,
-  });
-};
-
-define('window', dom.window);
-define('document', dom.window.document);
-define('navigator', dom.window.navigator);
-define('HTMLElement', dom.window.HTMLElement);
-define('Element', dom.window.Element);
-define('Node', dom.window.Node);
-define('Event', dom.window.Event);
-define('MouseEvent', dom.window.MouseEvent);
-define('KeyboardEvent', dom.window.KeyboardEvent);
-define('getComputedStyle', dom.window.getComputedStyle);
-define(
-  'requestAnimationFrame',
-  dom.window.requestAnimationFrame.bind(dom.window)
-);
-define(
-  'cancelAnimationFrame',
-  dom.window.cancelAnimationFrame.bind(dom.window)
-);
-define('IS_REACT_ACT_ENVIRONMENT', true);
+const originalError = console.error.bind(console);
 
 const main = async () => {
+  // jsdom is only needed to run this check; it is not a committed dependency, so the
+  // module is loaded dynamically and typed loosely.
+  const { JSDOM } = (await import('jsdom' as string)) as {
+    JSDOM: new (
+      html: string,
+      options?: Record<string, unknown>
+    ) => { window: Window & typeof globalThis };
+  };
+
+  // jsdom globals must exist before react-dom is imported.
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="root"></div></body></html>',
+    {
+      url: 'http://localhost/',
+      pretendToBeVisual: true,
+    }
+  );
+
+  // `navigator` is a getter-only property on modern Node, so assign via
+  // defineProperty rather than plain assignment.
+  const define = (key: string, value: unknown) => {
+    Object.defineProperty(globalThis, key, {
+      value,
+      configurable: true,
+      writable: true,
+    });
+  };
+
+  define('window', dom.window);
+  define('document', dom.window.document);
+  define('navigator', dom.window.navigator);
+  define('HTMLElement', dom.window.HTMLElement);
+  define('Element', dom.window.Element);
+  define('Node', dom.window.Node);
+  define('Event', dom.window.Event);
+  define('MouseEvent', dom.window.MouseEvent);
+  define('KeyboardEvent', dom.window.KeyboardEvent);
+  define('getComputedStyle', dom.window.getComputedStyle);
+  define(
+    'requestAnimationFrame',
+    dom.window.requestAnimationFrame.bind(dom.window)
+  );
+  define(
+    'cancelAnimationFrame',
+    dom.window.cancelAnimationFrame.bind(dom.window)
+  );
+  define('IS_REACT_ACT_ENVIRONMENT', true);
+
   // Imported here so the jsdom globals above are in place first.
   const { createRoot } = await import('react-dom/client');
   const { IntlProvider } = await import('react-intl');
@@ -73,7 +84,6 @@ const main = async () => {
 
   // Headless UI registers this warning when it hands a ref to a component that cannot
   // take one, which is exactly the bug being guarded against.
-  const originalError = console.error;
   const consoleErrors: string[] = [];
 
   console.error = (...args: unknown[]) => {
@@ -99,6 +109,10 @@ const main = async () => {
     syncEnabled: false,
     preventSearch: false,
     tagRequests: false,
+    // Required by DVRSettings but never read by the modal.
+    activeProfileName: 'Default',
+    is4k: false,
+    overrideRule: [] as number[],
   };
 
   const element = React.createElement(

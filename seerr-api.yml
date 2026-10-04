@@ -184,6 +184,16 @@ components:
           nullable: true
           description: 'Time period in days for TV quota'
           example: 14
+        musicQuotaLimit:
+          type: number
+          nullable: true
+          description: 'Maximum number of music requests allowed'
+          example: 10
+        musicQuotaDays:
+          type: number
+          nullable: true
+          description: 'Time period in days for music quota'
+          example: 30
         globalMovieQuotaDays:
           type: number
           nullable: true
@@ -204,6 +214,16 @@ components:
           nullable: true
           description: 'Global TV quota days setting'
           example: 14
+        globalMusicQuotaLimit:
+          type: number
+          nullable: true
+          description: 'Global music quota limit setting'
+          example: 10
+        globalMusicQuotaDays:
+          type: number
+          nullable: true
+          description: 'Global music quota days setting'
+          example: 30
         watchlistSyncMovies:
           type: boolean
           nullable: true

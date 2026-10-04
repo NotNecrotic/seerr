@@ -201,6 +201,47 @@ const main = async () => {
   const service = await get(session, '/api/v1/service/lidarr');
   check('returns 200', service.status === 200, `status ${service.status}`);
 
+  console.log('GET /api/v1/user/:id/settings/main (quota fields)');
+  const me = await get(session, '/api/v1/auth/me');
+  const userId = (me.body as { id?: number })?.id;
+
+  if (userId) {
+    const general = await get(session, `/api/v1/user/${userId}/settings/main`);
+    check('returns 200', general.status === 200, `status ${general.status}`);
+    const settings = general.body as Record<string, unknown>;
+    // The global* fields come from `main.defaultQuotas`, which the public settings
+    // schema does not expose, so they are absent for movie and TV on a stock install
+    // too. What matters here is that music behaves exactly like the other two.
+    check(
+      'exposes the user music quota override',
+      'musicQuotaLimit' in settings && 'musicQuotaDays' in settings,
+      `limit=${String(settings.musicQuotaLimit)} days=${String(settings.musicQuotaDays)}`
+    );
+    check(
+      'exposes user quota overrides for all three media types',
+      ['movieQuotaLimit', 'tvQuotaLimit', 'musicQuotaLimit'].every(
+        (k) => k in settings
+      )
+    );
+
+    // Quota overrides are only writable when the target user lacks MANAGE_USERS and is
+    // not the requester, which is the same guard for every media type. Posting the
+    // fields must therefore be accepted rather than rejected.
+    const res = await fetch(`${BASE}/api/v1/user/${userId}/settings/main`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        cookie: session.cookie,
+        ...(session.csrf ? { 'X-XSRF-TOKEN': session.csrf } : {}),
+      },
+      body: JSON.stringify({
+        musicQuotaLimit: 4,
+        musicQuotaDays: 21,
+      }),
+    });
+    check('accepts a music quota override', res.ok, `status ${res.status}`);
+  }
+
   console.log('');
   if (failures.length) {
     console.error(`FAILED: ${failures.join(', ')}`);

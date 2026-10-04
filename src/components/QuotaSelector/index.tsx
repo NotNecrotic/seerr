@@ -7,14 +7,17 @@ const messages = defineMessages('components.QuotaSelector', {
     '{quotaLimit} <quotaUnits>{movies} per {quotaDays} {days}</quotaUnits>',
   tvRequests:
     '{quotaLimit} <quotaUnits>{seasons} per {quotaDays} {days}</quotaUnits>',
+  musicRequests:
+    '{quotaLimit} <quotaUnits>{albums} per {quotaDays} {days}</quotaUnits>',
   movies: '{count, plural, one {movie} other {movies}}',
   seasons: '{count, plural, one {season} other {seasons}}',
+  albums: '{count, plural, one {album} other {albums}}',
   days: '{count, plural, one {day} other {days}}',
   unlimited: 'Unlimited',
 });
 
 interface QuotaSelectorProps {
-  mediaType: 'movie' | 'tv';
+  mediaType: 'movie' | 'tv' | 'music';
   defaultDays?: number;
   defaultLimit?: number;
   dayOverride?: number;
@@ -53,7 +56,11 @@ const QuotaSelector = ({
   return (
     <div className={`${isDisabled ? 'opacity-50' : ''}`}>
       {intl.formatMessage(
-        mediaType === 'movie' ? messages.movieRequests : messages.tvRequests,
+        mediaType === 'movie'
+          ? messages.movieRequests
+          : mediaType === 'tv'
+            ? messages.tvRequests
+            : messages.musicRequests,
         {
           quotaLimit: (
             <select
