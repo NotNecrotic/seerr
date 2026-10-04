@@ -132,6 +132,34 @@ class MusicBrainzAPI extends ExternalAPI {
   }
 
   /**
+   * Verify the service is reachable and usable.
+   *
+   * MusicBrainz is a keyless public service with no credentials to configure, so this
+   * backs the read-only provider row in Settings → Metadata. A single known release is
+   * enough to prove both connectivity and that responses parse.
+   */
+  public async test(): Promise<boolean> {
+    const response = await this.getRolling<
+      MbSearchResponse<'releases', MbReleaseSearchResult>
+    >(
+      '/release',
+      {
+        params: {
+          // Any stable, real release works; this one is used because it is
+          // unambiguously an album with a known artist.
+          query:
+            'release:"Grace" AND arid:187b6e7d-6186-41d3-aaba-76474713965e',
+          limit: 1,
+          fmt: 'json',
+        },
+      },
+      60
+    );
+
+    return mbResults(response, 'releases').length > 0;
+  }
+
+  /**
    * Search releases (albums) by a free-text query.
    */
   public async searchReleases({

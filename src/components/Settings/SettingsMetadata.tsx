@@ -21,6 +21,9 @@ const messages = defineMessages('components.Settings', {
   settings: 'Settings',
   seriesMetadataProvider: 'Series metadata provider',
   animeMetadataProvider: 'Anime metadata provider',
+  musicMetadataProvider: 'Music metadata provider',
+  musicProviderReadOnly:
+    'MusicBrainz is always used for music and needs no configuration. Use Test to check the connection.',
   metadataSettings: 'Settings for metadata provider',
   clickTest:
     'Click on the "Test" button to check connectivity with metadata providers',
@@ -46,6 +49,11 @@ type ProviderStatus = 'ok' | 'not tested' | 'failed';
 interface ProviderResponse {
   tvdb: ProviderStatus;
   tmdb: ProviderStatus;
+  /**
+   * MusicBrainz is always the music provider and is not user-selectable, so it is
+   * always tested alongside the configurable ones.
+   */
+  musicbrainz: ProviderStatus;
 }
 
 interface MetadataValues {
@@ -64,6 +72,7 @@ const SettingsMetadata = () => {
   const defaultStatus: ProviderResponse = {
     tmdb: 'not tested',
     tvdb: 'not tested',
+    musicbrainz: 'not tested',
   };
 
   const [providerStatus, setProviderStatus] =
@@ -99,6 +108,8 @@ const SettingsMetadata = () => {
     const testData = {
       tmdb: useTmdb,
       tvdb: useTvdb,
+      // MusicBrainz is unconditional: music metadata always comes from it.
+      musicbrainz: true,
     };
 
     try {
@@ -110,6 +121,7 @@ const SettingsMetadata = () => {
       const newStatus: ProviderResponse = {
         tmdb: useTmdb ? response.data.tests.tmdb : 'not tested',
         tvdb: useTvdb ? response.data.tests.tvdb : 'not tested',
+        musicbrainz: response.data.tests.musicbrainz,
       };
 
       setProviderStatus(newStatus);
@@ -126,6 +138,7 @@ const SettingsMetadata = () => {
           const newStatus: ProviderResponse = {
             tmdb: useTmdb ? errorData.tests.tmdb : 'not tested',
             tvdb: useTvdb ? errorData.tests.tvdb : 'not tested',
+            musicbrainz: errorData.tests.musicbrainz,
           };
 
           setProviderStatus(newStatus);
@@ -166,6 +179,9 @@ const SettingsMetadata = () => {
         setProviderStatus({
           tmdb: mapStatusValue(response.data.tests.tmdb),
           tvdb: mapStatusValue(response.data.tests.tvdb),
+          // Saving the TV/anime providers does not test MusicBrainz; keep whatever the
+          // last explicit test established.
+          musicbrainz: providerStatus.musicbrainz,
         });
       }
 
@@ -199,6 +215,7 @@ const SettingsMetadata = () => {
           setProviderStatus({
             tmdb: mapStatusValue(errorData.tests.tmdb),
             tvdb: mapStatusValue(errorData.tests.tvdb),
+            musicbrainz: providerStatus.musicbrainz,
           });
         }
       }
@@ -382,6 +399,40 @@ const SettingsMetadata = () => {
                       }
                       isDisabled={isSubmitting}
                     />
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <label
+                    htmlFor="music-metadata-provider"
+                    className="checkbox-label"
+                  >
+                    <span className="mr-2">
+                      {intl.formatMessage(messages.musicMetadataProvider)}
+                    </span>
+                  </label>
+                  <div className="form-input-area">
+                    {/* MusicBrainz is the only music metadata source, so this is shown
+                        for visibility but cannot be changed. */}
+                    <div className="flex items-center">
+                      <span
+                        id="music-metadata-provider"
+                        data-testid="music-metadata-provider"
+                        className="rounded-md bg-gray-800 px-3 py-2 text-sm text-gray-200"
+                      >
+                        {MetadataProviderType.MUSICBRAINZ}
+                      </span>
+                      <span
+                        className={`ml-3 text-sm ${getStatusClass(
+                          providerStatus.musicbrainz
+                        )}`}
+                      >
+                        {providerStatus.musicbrainz}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-400">
+                      {intl.formatMessage(messages.musicProviderReadOnly)}
+                    </p>
                   </div>
                 </div>
 

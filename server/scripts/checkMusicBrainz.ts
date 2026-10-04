@@ -27,6 +27,9 @@ const main = async () => {
   getSettings();
   const mb = new MusicBrainz();
 
+  console.log('test()');
+  check('reports the service as reachable', await mb.test());
+
   console.log('browseReleases()');
   const browsed = await mb.browseReleases({ limit: 5 });
   check('returns results', browsed.length > 0, `${browsed.length} releases`);

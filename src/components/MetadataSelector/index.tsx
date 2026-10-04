@@ -5,6 +5,11 @@ import Select, { type StylesConfig } from 'react-select';
 enum MetadataProviderType {
   TMDB = 'tmdb',
   TVDB = 'tvdb',
+  /**
+   * Not selectable: MusicBrainz is the only music metadata source. Kept here so the
+   * settings page can display it alongside the configurable providers.
+   */
+  MUSICBRAINZ = 'musicbrainz',
 }
 
 type MetadataProviderOptionType = {

@@ -1,3 +1,4 @@
+import MusicBrainz from '@server/api/musicbrainz';
 import TheMovieDb from '@server/api/themoviedb';
 import Tvdb from '@server/api/tvdb';
 import {
@@ -21,6 +22,9 @@ metadataRoutes.get('/', (_req, res) => {
   res.status(200).json({
     tv: settings.metadataSettings.tv,
     anime: settings.metadataSettings.anime,
+    // MusicBrainz is always used for music and takes no configuration, so this is a
+    // read-only signal for the UI rather than a selectable provider.
+    music: MetadataProviderType.MUSICBRAINZ,
   });
 });
 
@@ -96,9 +100,29 @@ metadataRoutes.put('/', async (req, res) => {
 metadataRoutes.post('/test', async (req, res) => {
   let tvdbTest = -1;
   let tmdbTest = -1;
+  // MusicBrainz is always in use for music, so it is tested on request rather than
+  // being driven by a selected provider.
+  let musicbrainzTest = -1;
 
   try {
-    const body = req.body as { tmdb: boolean; tvdb: boolean };
+    const body = req.body as {
+      tmdb: boolean;
+      tvdb: boolean;
+      musicbrainz?: boolean;
+    };
+
+    try {
+      if (body.musicbrainz) {
+        musicbrainzTest = 0;
+        const musicbrainz = new MusicBrainz();
+        musicbrainzTest = (await musicbrainz.test()) ? 1 : 0;
+      }
+    } catch (e) {
+      logger.error('Failed to test metadata provider', {
+        label: 'MetadataProvider',
+        errorMessage: e.message,
+      });
+    }
 
     try {
       if (body.tmdb) {
@@ -128,7 +152,11 @@ metadataRoutes.post('/test', async (req, res) => {
       });
     }
 
-    const success = !(tvdbTest === 0 || tmdbTest === 0);
+    const success = !(
+      tvdbTest === 0 ||
+      tmdbTest === 0 ||
+      musicbrainzTest === 0
+    );
     const statusCode = success ? 200 : 500;
 
     return res.status(statusCode).json({
@@ -136,6 +164,7 @@ metadataRoutes.post('/test', async (req, res) => {
       tests: {
         tmdb: getTestResultString(tmdbTest),
         tvdb: getTestResultString(tvdbTest),
+        musicbrainz: getTestResultString(musicbrainzTest),
       },
     });
   } catch (e) {
@@ -144,6 +173,7 @@ metadataRoutes.post('/test', async (req, res) => {
       tests: {
         tmdb: getTestResultString(tmdbTest),
         tvdb: getTestResultString(tvdbTest),
+        musicbrainz: getTestResultString(musicbrainzTest),
       },
       error: e.message,
     });

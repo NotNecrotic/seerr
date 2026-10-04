@@ -119,6 +119,12 @@ interface Quota {
 export enum MetadataProviderType {
   TMDB = 'tmdb',
   TVDB = 'tvdb',
+  /**
+   * MusicBrainz is the only source of music metadata and is not configurable: there
+   * is no alternative provider and no credentials to set. It is surfaced in settings
+   * for visibility and connection testing only.
+   */
+  MUSICBRAINZ = 'musicbrainz',
 }
 
 export interface MetadataSettings {
