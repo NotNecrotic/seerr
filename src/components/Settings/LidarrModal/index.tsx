@@ -200,7 +200,17 @@ const LidarrModal = ({ onClose, lidarr, onSave }: LidarrModalProps) => {
   }, []);
 
   return (
-    <Transition appear show as={Transition}>
+    <Transition
+      as="div"
+      appear
+      show
+      enter="transition-opacity ease-in-out duration-300"
+      enterFrom="opacity-0"
+      enterTo="opacity-100"
+      leave="transition-opacity ease-in-out duration-300"
+      leaveFrom="opacity-100"
+      leaveTo="opacity-0"
+    >
       <Formik
         initialValues={{
           name: lidarr?.name ?? '',
