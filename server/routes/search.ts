@@ -1,4 +1,4 @@
-import MusicBrainz from '@server/api/musicbrainz';
+import MusicBrainz, { describeApiError } from '@server/api/musicbrainz';
 import TheMovieDb from '@server/api/themoviedb';
 import type { TmdbSearchMultiResponse } from '@server/api/themoviedb/interfaces';
 import { MediaType } from '@server/constants/media';
@@ -58,7 +58,7 @@ const getMusicResults = async (
   } catch (e) {
     logger.debug('Something went wrong retrieving music search results', {
       label: 'API',
-      errorMessage: e.message,
+      errorMessage: describeApiError(e),
       query: queryString,
     });
 
@@ -148,7 +148,7 @@ searchRoutes.get('/artist', async (req, res, next) => {
   } catch (e) {
     logger.debug('Something went wrong retrieving artist search results', {
       label: 'API',
-      errorMessage: e.message,
+      errorMessage: describeApiError(e),
       query: req.query.query,
     });
     return next({
@@ -198,7 +198,7 @@ searchRoutes.get('/music', async (req, res, next) => {
   } catch (e) {
     logger.debug('Something went wrong retrieving music search results', {
       label: 'API',
-      errorMessage: e.message,
+      errorMessage: describeApiError(e),
       query: req.query.query,
     });
     return next({

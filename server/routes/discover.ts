@@ -1,5 +1,5 @@
 import ListenBrainzAPI from '@server/api/listenbrainz';
-import MusicBrainz from '@server/api/musicbrainz';
+import MusicBrainz, { describeApiError } from '@server/api/musicbrainz';
 import PlexTvAPI from '@server/api/plextv';
 import TheMovieDb, {
   MovieSortOptionsIterable,
@@ -206,7 +206,7 @@ discoverRoutes.get('/music', async (req, res, next) => {
   } catch (e) {
     logger.debug('Something went wrong retrieving music releases', {
       label: 'API',
-      errorMessage: e.message,
+      errorMessage: describeApiError(e),
     });
     return next({
       status: 500,

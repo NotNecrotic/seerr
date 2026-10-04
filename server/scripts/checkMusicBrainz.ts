@@ -9,7 +9,7 @@
  *   npx ts-node -r tsconfig-paths/register --project server/tsconfig.json \
  *     server/scripts/checkMusicBrainz.ts
  */
-import MusicBrainz from '@server/api/musicbrainz';
+import MusicBrainz, { describeApiError } from '@server/api/musicbrainz';
 import { getSettings } from '@server/lib/settings';
 
 const failures: string[] = [];
@@ -29,6 +29,47 @@ const main = async () => {
 
   console.log('test()');
   check('reports the service as reachable', await mb.test());
+
+  console.log('rate limit resilience (10 concurrent searches)');
+  // Reproduces the reported failure: a burst of page loads trips MusicBrainz's
+  // ~1 req/sec per-IP limit, which used to surface as "Unable to retrieve music
+  // releases". With client-side throttling plus bounded Retry-After retries, every
+  // search in the burst should still resolve.
+  const burst = await Promise.all(
+    [...new Array(10)].map((_, i) =>
+      mb
+        .searchReleases({ query: `avril lavigne ${i}`, limit: 5 })
+        .then((r) => !r || Array.isArray(r))
+        .catch((e) => {
+          console.log(`    burst member ${i} threw: ${describeApiError(e)}`);
+          return false;
+        })
+    )
+  );
+  check(
+    'all concurrent searches resolve despite rate limiting',
+    burst.every(Boolean),
+    `${burst.filter(Boolean).length}/${burst.length} succeeded`
+  );
+
+  console.log('searchReleases() with the reported query');
+  // Reproduces a real report: a multi-word artist query on the search page.
+  const avril = await mb.searchReleases({ query: 'avril lavigne', limit: 20 });
+  check('returns results', avril.length > 0, `${avril.length} releases`);
+  check(
+    'all results are mapped releases',
+    avril.every((r) => typeof r.id === 'string' && !!r.title)
+  );
+  check(
+    'artist names resolve',
+    avril.every((r) => !!r.artistName),
+    `${avril.filter((r) => !!r.artistName).length}/${avril.length}`
+  );
+  check(
+    'release-group ids resolve for every result',
+    avril.every((r) => !!r.releaseGroupId),
+    `${avril.filter((r) => !!r.releaseGroupId).length}/${avril.length}`
+  );
 
   console.log('browseReleases()');
   const browsed = await mb.browseReleases({ limit: 5 });

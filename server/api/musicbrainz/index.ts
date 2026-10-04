@@ -1,6 +1,7 @@
 import ExternalAPI from '@server/api/externalapi';
 import cacheManager from '@server/lib/cache';
 import { getSettings } from '@server/lib/settings';
+import logger from '@server/logger';
 import { getAppVersion } from '@server/utils/appVersion';
 import type {
   MbArtistDetails,
@@ -102,6 +103,90 @@ export interface MusicBrainzArtist {
 }
 
 /**
+ * Ceiling on how long a single retry will wait, regardless of `Retry-After`.
+ */
+const MAX_RETRY_DELAY_MS = 10_000;
+
+/**
+ * Whether an error is MusicBrainz rate limiting rather than a genuine failure.
+ *
+ * The service signals throttling with a 503 plus a JSON `error` field, which is the
+ * same status used for transient unavailability, so the body is checked too. This
+ * matters because the previous behaviour treated every 503 as fatal and reported
+ * "Unable to retrieve music releases" for what is really a temporary throttle.
+ */
+const isRateLimited = (error: unknown): boolean => {
+  const response = (error as { response?: { status?: number; data?: unknown } })
+    ?.response;
+
+  if (response?.status !== 503) {
+    return false;
+  }
+
+  const data = response.data as { error?: string } | undefined;
+
+  // No body means we cannot distinguish throttling from an outage; treat it as a
+  // throttle anyway, since retrying is harmless and bounded.
+  return typeof data?.error === 'string'
+    ? /rate limit|too many requests/i.test(data.error)
+    : true;
+};
+
+/** Read `Retry-After` (seconds) from a throttled response, when present. */
+const getRetryAfterMs = (error: unknown): number | undefined => {
+  const headers = (
+    error as { response?: { headers?: Record<string, unknown> } }
+  )?.response?.headers;
+  const value = headers?.['retry-after'] ?? headers?.['Retry-After'];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const seconds = Number(value);
+
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+};
+
+/**
+ * Produce a message worth logging.
+ *
+ * A raw axios error for a 503 carries an empty `message` with the useful detail in
+ * `response`, which is why rate-limit failures were logged as `errorMessage: ""`.
+ */
+export const describeApiError = (error: unknown): string => {
+  const err = error as {
+    message?: string;
+    code?: string;
+    response?: { status?: number; statusText?: string; data?: unknown };
+  };
+  const parts: string[] = [];
+
+  if (err?.message) {
+    parts.push(err.message);
+  }
+
+  if (err?.response) {
+    const { status, statusText, data } = err.response;
+    parts.push(`HTTP ${status ?? '?'}${statusText ? ` ${statusText}` : ''}`);
+
+    const detail =
+      typeof data === 'string'
+        ? data
+        : ((data as { error?: string; message?: string })?.error ??
+          (data as { message?: string })?.message);
+
+    if (detail) {
+      parts.push(detail);
+    }
+  } else if (err?.code) {
+    parts.push(err.code);
+  }
+
+  return parts.join(' — ') || 'Unknown MusicBrainz error';
+};
+
+/**
  * MusicBrainz Web Service (v2) client.
  *
  * Two constraints drive the implementation here:
@@ -121,6 +206,13 @@ class MusicBrainzAPI extends ExternalAPI {
       {
         nodeCache: cacheManager.getCache('musicbrainz').data,
         timeout,
+        // MusicBrainz allows roughly one request per second per source IP and answers
+        // anything faster with a 503. Without client-side throttling a burst of page
+        // loads reliably trips the limit, so requests are queued to stay under it.
+        rateLimit: {
+          maxRPS: 1,
+          maxRequests: 5,
+        },
         headers: {
           // MetaBrainz blocks generic agents; identify the app with a
           // contactable, versioned string.
@@ -132,6 +224,49 @@ class MusicBrainzAPI extends ExternalAPI {
   }
 
   /**
+   * Perform a request, transparently retrying MusicBrainz rate limiting.
+   *
+   * A throttled response is a 503 carrying a `Retry-After` header, not a failure of
+   * the query, so it is worth waiting out: without this, any burst that trips the
+   * limit surfaces as "Unable to retrieve music releases" even though the same query
+   * succeeds once the burst subsides. Retries are bounded so a sustained block still
+   * fails rather than hanging the request.
+   */
+  private async withRateLimitRetry<T>(request: () => Promise<T>): Promise<T> {
+    const MAX_ATTEMPTS = 3;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        return await request();
+      } catch (e) {
+        lastError = e;
+
+        if (!isRateLimited(e) || attempt === MAX_ATTEMPTS) {
+          throw e;
+        }
+
+        // Honour the server's Retry-After when present, capped so a malicious or
+        // mistaken large value cannot stall a page load indefinitely.
+        const retryAfterMs = Math.min(
+          getRetryAfterMs(e) ?? 1000,
+          MAX_RETRY_DELAY_MS
+        );
+
+        logger.debug('MusicBrainz rate limit hit, retrying', {
+          label: 'API',
+          attempt,
+          retryAfterMs,
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
    * Verify the service is reachable and usable.
    *
    * MusicBrainz is a keyless public service with no credentials to configure, so this
@@ -139,21 +274,21 @@ class MusicBrainzAPI extends ExternalAPI {
    * enough to prove both connectivity and that responses parse.
    */
   public async test(): Promise<boolean> {
-    const response = await this.getRolling<
-      MbSearchResponse<'releases', MbReleaseSearchResult>
-    >(
-      '/release',
-      {
-        params: {
-          // Any stable, real release works; this one is used because it is
-          // unambiguously an album with a known artist.
-          query:
-            'release:"Grace" AND arid:187b6e7d-6186-41d3-aaba-76474713965e',
-          limit: 1,
-          fmt: 'json',
+    const response = await this.withRateLimitRetry(() =>
+      this.getRolling<MbSearchResponse<'releases', MbReleaseSearchResult>>(
+        '/release',
+        {
+          params: {
+            // Any stable, real release works; this one is used because it is
+            // unambiguously an album with a known artist.
+            query:
+              'release:"Grace" AND arid:187b6e7d-6186-41d3-aaba-76474713965e',
+            limit: 1,
+            fmt: 'json',
+          },
         },
-      },
-      60
+        60
+      )
     );
 
     return mbResults(response, 'releases').length > 0;
@@ -177,19 +312,19 @@ class MusicBrainzAPI extends ExternalAPI {
       return [];
     }
 
-    const response = await this.getRolling<
-      MbSearchResponse<'releases', MbReleaseSearchResult>
-    >(
-      '/release',
-      {
-        params: {
-          query: trimmed,
-          limit,
-          offset,
-          fmt: 'json',
+    const response = await this.withRateLimitRetry(() =>
+      this.getRolling<MbSearchResponse<'releases', MbReleaseSearchResult>>(
+        '/release',
+        {
+          params: {
+            query: trimmed,
+            limit,
+            offset,
+            fmt: 'json',
+          },
         },
-      },
-      3600
+        3600
+      )
     );
 
     return mbResults(response, 'releases').map((result) =>
@@ -209,15 +344,17 @@ class MusicBrainzAPI extends ExternalAPI {
     releaseMbid: string;
     language?: string;
   }): Promise<MusicBrainzRelease> {
-    const response = await this.getRolling<MbReleaseDetails>(
-      `/release/${releaseMbid}`,
-      {
-        params: {
-          inc: 'recordings+artist-credits+release-groups+labels',
-          fmt: 'json',
+    const response = await this.withRateLimitRetry(() =>
+      this.getRolling<MbReleaseDetails>(
+        `/release/${releaseMbid}`,
+        {
+          params: {
+            inc: 'recordings+artist-credits+release-groups+labels',
+            fmt: 'json',
+          },
         },
-      },
-      3600
+        3600
+      )
     );
 
     return this.mapReleaseDetails(response);
@@ -306,19 +443,19 @@ class MusicBrainzAPI extends ExternalAPI {
       clauses.push('primarytype:album');
     }
 
-    const response = await this.getRolling<
-      MbSearchResponse<'releases', MbReleaseSearchResult>
-    >(
-      '/release',
-      {
-        params: {
-          query: clauses.join(' AND '),
-          limit,
-          offset,
-          fmt: 'json',
+    const response = await this.withRateLimitRetry(() =>
+      this.getRolling<MbSearchResponse<'releases', MbReleaseSearchResult>>(
+        '/release',
+        {
+          params: {
+            query: clauses.join(' AND '),
+            limit,
+            offset,
+            fmt: 'json',
+          },
         },
-      },
-      3600
+        3600
+      )
     );
 
     return mbResults(response, 'releases').map((result) =>
@@ -339,15 +476,17 @@ class MusicBrainzAPI extends ExternalAPI {
       return undefined;
     }
 
-    const response = await this.getRolling<MbArtistDetails>(
-      `/artist/${artistMbid}`,
-      {
-        params: {
-          inc: 'tags+aliases+artist-rels',
-          fmt: 'json',
+    const response = await this.withRateLimitRetry(() =>
+      this.getRolling<MbArtistDetails>(
+        `/artist/${artistMbid}`,
+        {
+          params: {
+            inc: 'tags+aliases+artist-rels',
+            fmt: 'json',
+          },
         },
-      },
-      3600
+        3600
+      )
     );
 
     return this.mapArtistDetails(response);
@@ -374,21 +513,21 @@ class MusicBrainzAPI extends ExternalAPI {
       return [];
     }
 
-    const response = await this.getRolling<
-      MbSearchResponse<'releases', MbReleaseSearchResult>
-    >(
-      '/release',
-      {
-        params: {
-          artist: artistMbid,
-          limit,
-          offset,
-          // Prefer official, non-live releases: Lidarr cannot grab live recordings.
-          status: 'official',
-          fmt: 'json',
+    const response = await this.withRateLimitRetry(() =>
+      this.getRolling<MbSearchResponse<'releases', MbReleaseSearchResult>>(
+        '/release',
+        {
+          params: {
+            artist: artistMbid,
+            limit,
+            offset,
+            // Prefer official, non-live releases: Lidarr cannot grab live recordings.
+            status: 'official',
+            fmt: 'json',
+          },
         },
-      },
-      3600
+        3600
+      )
     );
 
     return (
@@ -422,19 +561,19 @@ class MusicBrainzAPI extends ExternalAPI {
       return [];
     }
 
-    const response = await this.getRolling<
-      MbSearchResponse<'artists', MbArtistSearchResult>
-    >(
-      '/artist',
-      {
-        params: {
-          query: trimmed,
-          limit,
-          offset,
-          fmt: 'json',
+    const response = await this.withRateLimitRetry(() =>
+      this.getRolling<MbSearchResponse<'artists', MbArtistSearchResult>>(
+        '/artist',
+        {
+          params: {
+            query: trimmed,
+            limit,
+            offset,
+            fmt: 'json',
+          },
         },
-      },
-      3600
+        3600
+      )
     );
 
     return mbResults(response, 'artists').map((result) => ({
