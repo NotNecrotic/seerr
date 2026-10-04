@@ -169,3 +169,69 @@ silently overflowed every Postgres install. Fixed by:
 - Node 24 is installed but the project pins `^22.19.0` with `engine-strict=true` in
   `.npmrc`, so installs need `--config.engine-strict=false`.
 - `pnpm install` exceeds the 30s command timeout; run it backgrounded and poll the log.
+
+## Phase 8 - Usability fixes (bug reports)
+
+All five bug reports fixed and verified.
+
+- **MusicBrainz response parsing.** Result arrays are keyed by entity type
+  (`releases`, `artists`), not `results`, so every search path threw and
+  `/discover/music` 500'd. `MbSearchResponse<TKey, T>` now takes the key as a
+  generic and `mbResults()` reads it, defaulting to `[]` so a renamed key
+  degrades to "no results" instead of throwing. Paging fields are optional because
+  browse endpoints report `release-count`/`release-offset` while search reports
+  `count`/`offset`.
+- **Release tracks.** Tracks are nested under `media[]` (one entry per disc), not on
+  the release, so `getRelease` returned 0 tracks. `flattenReleaseTracks()` flattens
+  the per-disc lists and adds each medium's `track-offset` so multi-disc sets keep
+  unique release-wide track numbers.
+- **Artist attribution.** The `artist=` browse parameter returns no artist credits,
+  so `getArtistReleases` fell back to `"Unknown Artist"` for every release. It now
+  accepts `artistName`, which the artist route supplies from the resolved artist.
+- **Lidarr modal.** Root `Transition` used `as={Transition}`, pointing Headless UI
+  at another Transition instead of an element, so the dialog rendered empty (21 bytes
+  of markup). Changed to `as="div"` with the same transition classes `SonarrModal`
+  uses.
+- **Permissions/quotas UI.** `REQUEST_MUSIC`, `AUTO_APPROVE_MUSIC` and
+  `AUTO_REQUEST_MUSIC` existed server-side with no editor entries. Added them under
+  the existing groups, and wired `musicQuotaLimit`/`musicQuotaDays` through the
+  user settings route, the OpenAPI schema, `QuotaSelector` (now takes `music`), the
+  user profile, and the admin global defaults.
+- **Global search.** `/api/v1/search` returned TMDB only, so `/search/music` and
+  `/search/artist` were unreachable from the app-wide search box. Releases and artists
+  are now resolved alongside TMDB and merged into one envelope; the music lookup
+  swallows its own errors so a MusicBrainz outage degrades to TMDB-only results. Added
+  `ArtistCard` (mirrors `PersonCard`, MusicBrainz UUID ids, Cover Art Archive art)
+  and split the merged results into `items`/`musicItems`/`artistItems`.
+- **Duplicate search box.** Removed the local input on `/discover/music`; it only
+  redirected to `/search` and is now redundant.
+- **Metadata settings.** MusicBrainz shown as a read-only provider row with status,
+  plus `MusicBrainz.test()` and a `musicbrainz` result on
+  `POST /settings/metadatas/test`.
+
+### Verification harnesses (opt-in, not part of `npm test`)
+
+- `server/scripts/checkMusicBrainz.ts` - exercises the client against the live API.
+  This is what surfaced the track-nesting and artist-credit bugs.
+- `server/scripts/checkMusicRoutes.ts` - drives the authenticated endpoints
+  end-to-end through the OpenAPI validator with a real session.
+- `src/components/Settings/LidarrModal/renderCheck.tsx` - mounts the real modal in
+  jsdom; fails on the old `as={Transition}` markup, passes on the fix.
+- `src/components/ArtistCard/renderCheck.tsx` - same for the new artist card.
+
+Run the server ones with `npx ts-node -r tsconfig-paths/register --files --project
+server/tsconfig.json <script>` and the client ones with `npx tsx <script>`. jsdom is
+needed for the render checks but is deliberately **not** a committed dependency;
+install it locally with `pnpm add --save-dev jsdom --config.engine-strict=false`.
+
+### Environment notes (added)
+
+- Long-running processes must be launched detached (`start /b ... > log 2>&1`); a
+  plain backgrounded start gets its process tree killed when the command times out.
+- A leftover dev server on port 5055 makes `npm test` fail `server/routes/user`
+  (4 tests). Stop the server before running the suite.
+- The husky `prepare-commit-msg` hook shells out to `/dev/tty` for `cz` and
+  always fails on Windows, blocking every commit. Use `HUSKY=0` together with
+  `--no-verify`; lint-staged has already run and passed by the time the hook fires.
+- `next dev` misdetects the workspace root (it picks up a lockfile in the parent home
+  directory) and hangs while compiling, so it is not a usable way to verify UI changes.

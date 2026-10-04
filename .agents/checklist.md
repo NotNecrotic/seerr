@@ -70,3 +70,36 @@ Plan: `plan.md` · Progress: `progress.md`
 ## Phase 9 — Docs & validation
 - [ ] `seerr-api.yml` schemas and endpoints
 - [x] `typecheck:server`, `typecheck:client`, `eslint` (0 errors), `node server/test/index.mts` (235 pass)
+## Phase 10 - Bug report fixes (all verified)
+- [x] MusicBrainz envelope: result key is the generic `TKey`; `mbResults()` reads it
+- [x] `getRelease` track list read from `media[]`; multi-disc `track-offset` applied
+- [x] `getArtistReleases` takes `artistName` (the `artist=` browse returns no credits)
+- [x] `LidarrModal` `Transition` root uses `as="div"` (was `as={Transition}`, blank modal)
+- [x] Music permissions in `PermissionEdit`; music quota wired through route/schema/UI
+- [x] `QuotaSelector` accepts `'music'` with album phrasing
+- [x] Global `/search` merges MusicBrainz releases + artists with TMDB results
+- [x] `ArtistCard` added; `ListView` splits `items`/`musicItems`/`artistItems`
+- [x] Removed the duplicate search input from `/discover/music`
+- [x] Read-only MusicBrainz row + connection test in metadata settings
+- [x] `ArtistSearchResult` added to the OpenAPI `/search` response schema
+
+## Phase 11 - Verification harnesses (opt-in)
+- [x] `server/scripts/checkMusicBrainz.ts` (live API)
+- [x] `server/scripts/checkMusicRoutes.ts` (authenticated, through the OpenAPI validator)
+- [x] `LidarrModal/renderCheck.tsx` (fails on the old markup, passes on the fix)
+- [x] `ArtistCard/renderCheck.tsx`
+
+## Final validation
+- [x] `typecheck:server` / `typecheck:client` clean
+- [x] `eslint` 0 errors
+- [x] `node server/test/index.mts` - 235 pass, 0 fail
+- [x] `/discover/music`, `/search`, `/search/music`, `/search/artist`, `/music/:mbid`,
+      `/artist/:mbid(/releases)`, `/settings/lidarr`, `/service/lidarr` all 200
+- [x] `/settings/metadatas` returns `music: musicbrainz`; test endpoint reports `ok`
+
+## Still open
+- [ ] Music section on the discover landing page (unchanged from earlier phases)
+- [ ] Lidarr `foreignAlbumId` is a release-group id while `Media.musicBrainzId` stores a
+      release id; end-to-end Lidarr availability matching is still unproven
+- [ ] Per-item Plex music GUID extraction and Jellyfin music-library scanning
+- [ ] ListenBrainz popularity sorting waits on an optional admin token
